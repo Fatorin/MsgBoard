@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Common.Setting;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -13,16 +14,12 @@ namespace Client
     {
         static Thread ThreadClient = null;
         static Socket SocketClient = null;
-        //監聽用的PORT
-        private const int portNum = 9987;
-        private const string hostIP = "127.0.0.1";
-
         static void Main(string[] args)
         {
             try
             { 
-                IPAddress ip = IPAddress.Parse(hostIP);
-                IPEndPoint ipe = new IPEndPoint(ip, portNum);
+                IPAddress ip = IPAddress.Parse(GlobalSetting.LocalIP);
+                IPEndPoint ipe = new IPEndPoint(ip, GlobalSetting.PortNum);
 
                 SocketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
