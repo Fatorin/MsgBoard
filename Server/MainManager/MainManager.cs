@@ -1,17 +1,14 @@
 ﻿using Common;
 using Common.Setting;
-using Microsoft.EntityFrameworkCore.Storage;
-using Newtonsoft.Json;
 using Server.Redis;
 using StackExchange.Redis;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
+using Newtonsoft.Json;
 using IDatabase = StackExchange.Redis.IDatabase;
 
 namespace Server.MainManager
@@ -47,8 +44,8 @@ namespace Server.MainManager
             //監聽數量
             Sockets.Listen(20);
 
-            //抓資料
-            //GetTempData();
+            //去Redis//DB產生假的資料
+            InitFakeData();
 
             Thread t1 = new Thread(Connecting);
             t1.IsBackground = true;
@@ -126,6 +123,19 @@ namespace Server.MainManager
                     break;
                 }
             }
+        }
+
+        private void InitFakeData()
+        {
+            List<MessageInfoData> dataList = new List<MessageInfoData>();
+            for(int i = 0; i > 10; i++)
+            {
+                dataList.Add(new MessageInfoData
+                {
+                    Message = $"testString:{i}"
+                });
+            }
+            SaveMultiInfoDataToRedis(GetRedisDb(), GetRedisDataKey(), dataList);
         }
 
         private bool GetTempData()

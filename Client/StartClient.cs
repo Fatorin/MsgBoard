@@ -1,4 +1,5 @@
-﻿using Common.Setting;
+﻿using Common;
+using Common.Setting;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -52,9 +53,39 @@ namespace Client
             }
         }
 
-        public static void Received()
+        private static void ReceivedAll()
         {
-            bool isMsg = false;
+            while (true)
+            {
+                try
+                {
+                    byte[] buffer = new byte[1024 * 1024];
+
+                    int length = SocketClient.Receive(buffer);
+
+                    MessageStreamHelper.GetStream(buffer, out var ack, out var infoDatas);
+
+                    if (ack != MessageAck.Success)
+                    {
+                        Console.WriteLine($"{nameof(ReceivedAll)} Fail, Ack={ack}");
+                        break;
+                    }
+                    
+                    foreach(MessageInfoData infoData in infoDatas)
+                    {
+                        Console.WriteLine($"Msg:{infoData.Message}");
+                    }
+
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Server is disconnect！{ex.Message}");
+                    break;
+                }
+            }
+        }
+        private static void Received()
+        {
             while (true)
             {
                 try
@@ -64,16 +95,9 @@ namespace Client
                     int length = SocketClient.Receive(buffer);
  
                     string strRevMsg = Encoding.UTF8.GetString(buffer, 0, length);
-                    if (isMsg)
-                    {
-                        Console.WriteLine($"Server：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff} Msg:{strRevMsg}");
+                    
+                    Console.WriteLine($"Server：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff} Msg:{strRevMsg}");
 
-                    }
-                    else
-                    {
-                        Console.WriteLine(strRevMsg + "\r\n");
-                        isMsg = true;
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -83,7 +107,7 @@ namespace Client
             }
         }
 
-        public static void ClientSendMsg(string sendMsg)
+        private static void ClientSendMsg(string sendMsg)
         {     
             byte[] msgArray = Encoding.UTF8.GetBytes(sendMsg); 
             SocketClient.Send(msgArray);
