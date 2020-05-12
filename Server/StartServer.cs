@@ -1,11 +1,10 @@
-﻿using System;
+﻿using Common;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Server
 {
@@ -16,7 +15,7 @@ namespace Server
         private const string hostIP = "127.0.0.1";
         static Socket Sockets = null;
         static Dictionary<string, Socket> ClientConnectDict = new Dictionary<string, Socket>();
-        static List<String> tempMsg = new List<string>();
+        static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
         static void Main(string[] args)
         {
             //IPAddress ip = IPAddress.Parse(hostIP);
@@ -29,6 +28,9 @@ namespace Server
             //監聽數量
             Sockets.Listen(20);
 
+            //抓資料
+            GetTempData();
+
             Thread t1 = new Thread(Connecting);
             t1.IsBackground = true;
             t1.Start();
@@ -36,6 +38,14 @@ namespace Server
             Console.WriteLine("Listing Now... Press any key close server.");
             Console.ReadKey();
             Sockets.Close();
+        }
+
+        static private bool GetTempData()
+        {
+            //從DB或REDIS撈資料
+            //先從Redis Api 尋找資料 有的話就回傳整串 沒有就從DB撈
+
+            return false;
         }
 
         static void Connecting()
@@ -60,8 +70,12 @@ namespace Server
                 IPAddress clientIP = ((IPEndPoint)connection.RemoteEndPoint).Address;
                 int clientPort = ((IPEndPoint)connection.RemoteEndPoint).Port;
 
+                //通知連線完成
                 string sendMsg = $" ClientIP:{clientIP} , Port:{clientPort} connect success.";
                 connection.Send(Encoding.UTF8.GetBytes(sendMsg));
+
+                //使用Server平常用的方式Payload做串流資料傳送過去
+                connection.Send(MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray()));
 
                 Thread t2 = new Thread(Received);
                 t2.IsBackground = true;
