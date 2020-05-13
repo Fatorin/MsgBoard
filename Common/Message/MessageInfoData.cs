@@ -5,6 +5,6 @@ namespace Common
     [Serializable]
     public class MessageInfoData
     {
-        public string Message;
+        public string Message { get; set; }
     }
 }
