@@ -12,6 +12,7 @@ using IDatabase = StackExchange.Redis.IDatabase;
 using System.Net.NetworkInformation;
 using Newtonsoft.Json;
 using Common.User;
+using Common.Command;
 using System.Linq;
 
 namespace Server.MainManager
@@ -27,6 +28,7 @@ namespace Server.MainManager
                 return instace ?? new MainManager();
             }
         }
+
         private MainManager()
         {
             instace = this;
@@ -34,9 +36,13 @@ namespace Server.MainManager
 
         static Socket Sockets = null;
         static Dictionary<string, Socket> ClientConnectDict = new Dictionary<string, Socket>();
+        static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict = new Dictionary<byte, Action<Socket,byte[]>>();
         static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
+
         public void Start()
         {
+            //初始化對應的Command
+            InitCommandMapping();
             //IPAddress ip = IPAddress.Parse(hostIP);
             IPAddress ip = IPAddress.Any;
             //綁定到IPEndPoint上
@@ -72,6 +78,98 @@ namespace Server.MainManager
             }
         }
 
+        private void InitCommandMapping()
+        {
+            CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>()
+            {
+                { (byte)Command.LoginAuth, ReceviveLoginAuthData},
+                { (byte)Command.GetMsgOnce, ReceviveOneMessage},
+            };
+        }
+
+        private void ReceiveCommand(object socketClient)
+        {
+            Socket socket = (Socket)socketClient;
+            while (true)
+            {
+                try
+                {
+                    //先接收指令類別，然後將對應的資料傳給對應的Func
+                    byte[] buffer = new byte[8192];
+                    int length = socket.Receive(buffer);
+                    buffer.GetCommand(out var command);
+                    if (!CommandRespDict.TryGetValue((byte)command, out var mappingFunc))
+                    {
+                        Console.WriteLine("Not found mapping function.");
+                        throw new Exception();
+                    };
+                    //過濾第一個字並拿取封包長度去掉Command的部分
+                    mappingFunc(socket, buffer.Skip(CommandHelper.CommandSize).Take(buffer.Length - CommandHelper.CommandSize).ToArray());
+                }
+                catch (Exception)
+                {
+                    ClientConnectDict.Remove(socket.RemoteEndPoint.ToString());
+                    Console.WriteLine($"Client:{socket.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
+                    socket.Close();
+                    break;
+                }
+            }
+        }
+
+        private void ReceviveLoginAuthData(Socket socket, byte[] byteArray)
+        {
+            UserStreamHelper.GetStream(byteArray, out var ackCode, out var infoData);
+            Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
+
+            ackCode = UserAck.Success;
+            if (infoData.UserId != "999")
+            {
+                ackCode = UserAck.AuthFail;
+            }
+            //回傳成功訊息給對應的人
+            SendCommand(socket, Command.LoginAuth, UserStreamHelper.CreateAck(ackCode));
+            //回傳留言版資料
+            if (tempMsg.Count != 0)
+            {
+                SendCommand(socket, Command.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray()));
+            }
+        }
+
+        private void ReceviveOneMessage(Socket socket, byte[] byteArray)
+        {
+            while (true)
+            {
+                try
+                {
+                    //這邊有包含玩家資料 所以要小心
+                    string receviedStr = Encoding.UTF8.GetString(byteArray);
+
+                    Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
+
+                    if (ClientConnectDict.Count > 0)
+                    {
+                        foreach (var socketTemp in ClientConnectDict)
+                        {
+                            if (socketTemp.Key == socket.RemoteEndPoint.ToString()) continue;
+                            socketTemp.Value.Send(Encoding.UTF8.GetBytes($"[{socket.RemoteEndPoint}]:{receviedStr}"));
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    ClientConnectDict.Remove(socket.RemoteEndPoint.ToString());
+                    Console.WriteLine($"Client:{socket.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
+                    socket.Close();
+                    break;
+                }
+            }
+        }
+
+        private void SendCommand(Socket socket, Command command, byte[] dataArray)
+        {
+            socket.Send(CommandHelper.CreateCommandAndData(command, dataArray));
+        }
+
         private void Connecting()
         {
             Socket connection = null;
@@ -94,77 +192,9 @@ namespace Server.MainManager
                 IPAddress clientIP = ((IPEndPoint)connection.RemoteEndPoint).Address;
                 int clientPort = ((IPEndPoint)connection.RemoteEndPoint).Port;
 
-                //比對帳密
-                byte[] buffer = new byte[1024 * 1024];
-                try
-                {
-                    connection.Receive(buffer);
-                    UserStreamHelper.GetStream(buffer, out var ack, out var infoData);
-                    Console.WriteLine($"Clinet:{connection.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
-
-                    var ackCode = UserAck.Success;
-                    if (infoData.UserId != "999")
-                    {
-                        ackCode = UserAck.AuthFail;
-                    }
-                    connection.Send(UserStreamHelper.CreateAck(ackCode));
-                    //成功了請傳送ACK 不然會CLINET會卡住
-                }
-                catch (Exception)
-                {
-                    ClientConnectDict.Remove(connection.RemoteEndPoint.ToString());
-                    Console.WriteLine($"Client:{connection.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-                    connection.Close();
-                    break;
-                }
-
-                //送出連線成功訊息與前一百則留言
-                string sendMsg = $" ClientIP:{clientIP} , Port:{clientPort} connect success.";
-                connection.Send(Encoding.UTF8.GetBytes(sendMsg));
-
-                if (tempMsg.Count != 0)
-                {
-                    connection.Send(MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray()));
-                }
-
-                Thread t2 = new Thread(Received);
-                t2.IsBackground = true;
-                t2.Start(connection);
-            }
-        }
-
-        private void Received(object socketclientpara)
-        {
-            Socket socket = (Socket)socketclientpara;
-
-            while (true)
-            {
-                byte[] buffer = new byte[1024 * 1024];
-
-                try
-                {
-                    int length = socket.Receive(buffer);
-
-                    string receviedStr = Encoding.UTF8.GetString(buffer, 0, length);
-
-                    Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
-
-                    if (ClientConnectDict.Count > 0)
-                    {
-                        foreach (var socketTemp in ClientConnectDict)
-                        {
-                            if (socketTemp.Key == socket.RemoteEndPoint.ToString()) continue;
-                            socketTemp.Value.Send(Encoding.UTF8.GetBytes($"[{socket.RemoteEndPoint}]:{receviedStr}"));
-                        }
-                    }
-                }
-                catch (Exception)
-                {
-                    ClientConnectDict.Remove(socket.RemoteEndPoint.ToString());
-                    Console.WriteLine($"Client:{socket.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-                    socket.Close();
-                    break;
-                }
+                Thread thread = new Thread(ReceiveCommand);
+                thread.IsBackground = true;
+                thread.Start(connection);
             }
         }
 

@@ -46,7 +46,7 @@ namespace Common
 			System.IO.MemoryStream memoryStream = new System.IO.MemoryStream(payload);
 			System.IO.BinaryReader binaryReader = new System.IO.BinaryReader(memoryStream);
 			ackCode = ((MessageAck)(binaryReader.ReadInt32()));
-			if ((binaryReader.ReadBoolean() == true))
+			if (binaryReader.ReadBoolean() == true)
 			{
 				infoDataArray = new MessageInfoData[binaryReader.ReadInt32()];
 				for (int i0 = 0; (i0 < infoDataArray.Length); i0 = (i0 + 1))

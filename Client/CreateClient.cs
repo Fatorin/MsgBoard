@@ -39,6 +39,7 @@ namespace Client
                 IPEndPoint ipe = new IPEndPoint(ip, serverPort);
 
                 SocketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                ConfigureTcpSocket(SocketClient);
 
                 try
                 {
@@ -82,8 +83,35 @@ namespace Client
             }
         }
 
+        private void ConfigureTcpSocket(Socket tcpSocket)
+        {
+            // Don't allow another socket to bind to this port.
+            tcpSocket.ExclusiveAddressUse = true;
+
+            // The socket will linger for 10 seconds after
+            // Socket.Close is called.
+            tcpSocket.LingerState = new LingerOption(true, 10);
+
+            // Disable the Nagle Algorithm for this tcp socket.
+            tcpSocket.NoDelay = true;
+
+            // Set the receive buffer size to 8k
+            tcpSocket.ReceiveBufferSize = 8192;
+
+            // Set the timeout for synchronous receive methods to
+            // 1 second (1000 milliseconds.)
+            tcpSocket.ReceiveTimeout = 1000;
+
+            // Set the send buffer size to 8k.
+            tcpSocket.SendBufferSize = 8192;
+
+            // Set the timeout for synchronous send methods
+            // to 1 second (1000 milliseconds.)
+            tcpSocket.SendTimeout = 1000;
+        }
         private void CheckAndGenUserInfo(out UserInfoData infoData)
         {
+            Console.WriteLine("Welcome use message board.");
             Console.WriteLine("Please Enter Your ID");
             var userId = Console.ReadLine();
             Console.WriteLine("Please Enter Your Password");
@@ -155,7 +183,7 @@ namespace Client
             {
                 try
                 {
-                    byte[] buffer = new byte[1024];
+                    byte[] buffer = new byte[512];
                     int length = SocketClient.Receive(buffer);
 
                     Console.WriteLine($"ReceivedAll Length:{length}");
@@ -167,10 +195,13 @@ namespace Client
                         Console.WriteLine($"{nameof(ReceivedAll)} Fail, Ack={ack}");
                         break;
                     }
-
-                    foreach (MessageInfoData infoData in infoDatas)
+                    else
                     {
-                        Console.WriteLine($"Msg:{infoData.Message}");
+                        foreach (MessageInfoData infoData in infoDatas)
+                        {
+                            Console.WriteLine($"Msg:{infoData.Message}");
+                        }
+                        break;
                     }
                 }
                 catch (Exception ex)
