@@ -31,7 +31,7 @@ namespace Client
             {
                 serverPort = GlobalSetting.PortNum2;
             }
-
+            InitCommandMapping();
             //輸入帳密判斷
             CheckAndGenUserInfo(out var userInfoData);
             Console.WriteLine("Logging in");
@@ -64,9 +64,9 @@ namespace Client
                 }
 
                 //登入成功才會進入監聽結果
-                /*ThreadClient = new Thread(ReceiveCommand);
+                ThreadClient = new Thread(ReceiveCommand);
                 ThreadClient.IsBackground = true;
-                ThreadClient.Start();*/
+                ThreadClient.Start();
 
                 Console.WriteLine("Please Type Anything 'Press Enter'：");
                 //輸送所有指令給伺服器
@@ -115,6 +115,7 @@ namespace Client
             CommandRespDict = new Dictionary<byte, Func<Socket, byte[] , bool>>()
             {
                 { (byte)Command.GetMsgAll, ReceviveAllMessage},
+                { (byte)Command.GetMsgOnce, ReceviveAllMessage},
             };
         }
         private void CheckAndGenUserInfo(out UserInfoData infoData)
@@ -220,68 +221,24 @@ namespace Client
 
         private bool ReceviveAllMessage(Socket socket, byte[] byteArray)
         {
-            while (true)
+             MessageStreamHelper.GetStream(byteArray, out var ack, out var infoDatas);
+
+            if (ack != MessageAck.Success)
             {
-                try
-                {
-                    byte[] buffer = new byte[512];
-                    int length = SocketClient.Receive(buffer);
-
-                    Console.WriteLine($"ReceivedAll Length:{length}");
-
-                    MessageStreamHelper.GetStream(buffer, out var ack, out var infoDatas);
-
-                    if (ack != MessageAck.Success)
-                    {
-                        Console.WriteLine($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
-                        break;
-                    }
-                    else
-                    {
-                        foreach (MessageInfoData infoData in infoDatas)
-                        {
-                            Console.WriteLine($"Msg:{infoData.Message}");
-                        }
-                        break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(ex.Message);
-                    break;
-                }
+                Console.WriteLine($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
+                return false;
+            }
+            
+            foreach (MessageInfoData infoData in infoDatas)
+            {
+                Console.WriteLine($"Msg:{infoData.Message}");
             }
             return true;
         }
 
-        private bool ReceivedMsgOnce(Socket socket, byte[] dataArray)
+        private void ClientSendMsg(Socket socket, Command command, string sendMsg)
         {
-            while (true)
-            {
-                try
-                {
-                    byte[] buffer = new byte[1024 * 1024];
-
-                    int length = SocketClient.Receive(buffer);
-
-                    string strRevMsg = Encoding.UTF8.GetString(buffer, 0, length);
-
-                    Console.WriteLine($"Server：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff} Msg:{strRevMsg}");
-
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Server is disconnect！{ex.Message}");
-                    break;
-                }
-            }
-            return true;
-        }
-
-        private void ClientSendMsg(string sendMsg)
-        {
-            byte[] msgArray = Encoding.UTF8.GetBytes(sendMsg);
-            SocketClient.Send(msgArray);
+            //轉換成物件再送出
         }
     }
 }
