@@ -1,4 +1,5 @@
 ﻿using Common;
+using Common.Command;
 using Common.Setting;
 using Common.User;
 using System;
@@ -16,6 +17,7 @@ namespace Client
     {
         static Thread ThreadClient = null;
         static Socket SocketClient = null;
+        static Dictionary<byte, Func<Socket, byte[], bool>> CommandRespDict = new Dictionary<byte, Func<Socket, byte[], bool>>();
         public void Start()
         {
             //懶得寫負載平衡 先這樣
@@ -52,28 +54,26 @@ namespace Client
                     return;
                 }
 
-                //送出帳號密碼
-                SocketClient.Send(UserStreamHelper.CreateStream(UserAck.Success, userInfoData));
+                //送出帳號密碼 要改成用專用送出
+                SendCommand(SocketClient,Command.LoginAuth,UserStreamHelper.CreateStream(UserAck.Success, userInfoData));
                 //等待接收登入是否成功
                 if (!ReceivedLogin())
                 {
-                    Console.WriteLine("Login Fail.");
+                    Console.WriteLine("Login Fail, will close connect.");
                     SocketClient.Close();
                 }
 
-                //監聽接收全部資料1次
-                ReceivedAll();
-                //成功後建立執行序監聽接收結果
-                ThreadClient = new Thread(Received);
+                //登入成功才會進入監聽結果
+                /*ThreadClient = new Thread(ReceiveCommand);
                 ThreadClient.IsBackground = true;
-                ThreadClient.Start();
+                ThreadClient.Start();*/
 
                 Console.WriteLine("Please Type Anything 'Press Enter'：");
                 //輸送所有指令給伺服器
                 while (true)
                 {
                     string sendStr = Console.ReadLine();
-                    ClientSendMsg(sendStr);
+                    //ClientSendMsg(sendStr);
                 }
             }
             catch (Exception ex)
@@ -108,6 +108,14 @@ namespace Client
             // Set the timeout for synchronous send methods
             // to 1 second (1000 milliseconds.)
             tcpSocket.SendTimeout = 1000;
+        }
+
+        private void InitCommandMapping()
+        {
+            CommandRespDict = new Dictionary<byte, Func<Socket, byte[] , bool>>()
+            {
+                { (byte)Command.GetMsgAll, ReceviveAllMessage},
+            };
         }
         private void CheckAndGenUserInfo(out UserInfoData infoData)
         {
@@ -146,6 +154,39 @@ namespace Client
                 UserPwd = userPwd,
             };
         }
+        private void SendCommand(Socket socket, Command command, byte[] dataArray)
+        {
+            socket.Send(CommandHelper.CreateCommandAndData(command, dataArray));
+        }
+
+        private void ReceiveCommand(object socketClient)
+        {
+            Socket socket = (Socket)socketClient;
+            while (true)
+            {
+                try
+                {
+                    //先接收指令類別，然後將對應的資料傳給對應的Func
+                    byte[] buffer = new byte[8192];
+                    int length = socket.Receive(buffer);
+                    buffer.GetCommand(out var command);
+                    if (!CommandRespDict.TryGetValue((byte)command, out var mappingFunc))
+                    {
+                        Console.WriteLine("Not found mapping function.");
+                        //不接受這個封包
+                        continue;
+                    };
+                    //過濾第一個字並拿取封包長度去掉Command的部分
+                    mappingFunc(socket, buffer.Skip(CommandHelper.CommandSize).Take(length - CommandHelper.CommandSize).ToArray());
+                }
+                catch (Exception)
+                {
+                    Console.WriteLine($"Packet has problem.");
+                    socket.Close();
+                    break;
+                }
+            }
+        }
 
         private bool ReceivedLogin()
         {
@@ -177,7 +218,7 @@ namespace Client
             return isLoginSuccess;
         }
 
-        private void ReceivedAll()
+        private bool ReceviveAllMessage(Socket socket, byte[] byteArray)
         {
             while (true)
             {
@@ -192,7 +233,7 @@ namespace Client
 
                     if (ack != MessageAck.Success)
                     {
-                        Console.WriteLine($"{nameof(ReceivedAll)} Fail, Ack={ack}");
+                        Console.WriteLine($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
                         break;
                     }
                     else
@@ -210,8 +251,10 @@ namespace Client
                     break;
                 }
             }
+            return true;
         }
-        private void Received()
+
+        private bool ReceivedMsgOnce(Socket socket, byte[] dataArray)
         {
             while (true)
             {
@@ -232,6 +275,7 @@ namespace Client
                     break;
                 }
             }
+            return true;
         }
 
         private void ClientSendMsg(string sendMsg)

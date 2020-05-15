@@ -45,8 +45,20 @@ namespace Server.MainManager
             InitCommandMapping();
             //IPAddress ip = IPAddress.Parse(hostIP);
             IPAddress ip = IPAddress.Any;
+            int port = GlobalSetting.PortNum1;
+            if (PortInUse(GlobalSetting.PortNum1)){
+                port = GlobalSetting.PortNum2;
+            }
+
+            if (PortInUse(GlobalSetting.PortNum1) && PortInUse(GlobalSetting.PortNum2))
+            {
+                Console.WriteLine("Port are used.");
+                Console.ReadKey();
+                return;
+            }
+            Console.WriteLine($"Port use {port}");
             //綁定到IPEndPoint上
-            IPEndPoint ipe = new IPEndPoint(ip, GlobalSetting.PortNum1);
+            IPEndPoint ipe = new IPEndPoint(ip, port);
 
             Sockets = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             Sockets.Bind(ipe);
@@ -101,10 +113,11 @@ namespace Server.MainManager
                     if (!CommandRespDict.TryGetValue((byte)command, out var mappingFunc))
                     {
                         Console.WriteLine("Not found mapping function.");
-                        throw new Exception();
+                        //不接受這個封包
+                        continue;
                     };
                     //過濾第一個字並拿取封包長度去掉Command的部分
-                    mappingFunc(socket, buffer.Skip(CommandHelper.CommandSize).Take(buffer.Length - CommandHelper.CommandSize).ToArray());
+                    mappingFunc(socket, buffer.Skip(CommandHelper.CommandSize).Take(length - CommandHelper.CommandSize).ToArray());
                 }
                 catch (Exception)
                 {
@@ -120,7 +133,7 @@ namespace Server.MainManager
         {
             UserStreamHelper.GetStream(byteArray, out var ackCode, out var infoData);
             Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
-
+            //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
             ackCode = UserAck.Success;
             if (infoData.UserId != "999")
             {
@@ -141,6 +154,7 @@ namespace Server.MainManager
             {
                 try
                 {
+                    //這邊還沒改 也要弄成對應的command/func
                     //這邊有包含玩家資料 所以要小心
                     string receviedStr = Encoding.UTF8.GetString(byteArray);
 
