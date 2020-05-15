@@ -117,7 +117,7 @@ namespace Server.MainManager
                         continue;
                     };
                     //過濾第一個字並拿取封包長度去掉Command的部分
-                    mappingFunc(socket, buffer.Skip(CommandHelper.CommandSize).Take(length - CommandHelper.CommandSize).ToArray());
+                    mappingFunc(socket, buffer.Skip(CommandStreamHelper.CommandSize).Take(length - CommandStreamHelper.CommandSize).ToArray());
                 }
                 catch (Exception)
                 {
@@ -181,7 +181,7 @@ namespace Server.MainManager
 
         private void SendCommand(Socket socket, Command command, byte[] dataArray)
         {
-            socket.Send(CommandHelper.CreateCommandAndData(command, dataArray));
+            socket.Send(CommandStreamHelper.CreateCommandAndData(command, dataArray));
         }
 
         private void Connecting()
