@@ -17,7 +17,8 @@ namespace Client
     {
         static Thread ThreadClient = null;
         static Socket SocketClient = null;
-        static Dictionary<byte, Func<Socket, byte[], bool>> CommandRespDict = new Dictionary<byte, Func<Socket, byte[], bool>>();
+        static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>();
+        static bool isLoginSuccess;
         public void Start()
         {
             //懶得寫負載平衡 先這樣
@@ -34,14 +35,12 @@ namespace Client
             InitCommandMapping();
             //輸入帳密判斷
             CheckAndGenUserInfo(out var userInfoData);
-            Console.WriteLine("Logging in");
             try
             {
                 IPAddress ip = IPAddress.Parse(GlobalSetting.LocalIP);
                 IPEndPoint ipe = new IPEndPoint(ip, serverPort);
 
                 SocketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                ConfigureTcpSocket(SocketClient);
 
                 try
                 {
@@ -54,27 +53,25 @@ namespace Client
                     return;
                 }
 
-                //送出帳號密碼 要改成用專用送出
-                SendCommand(SocketClient,Command.LoginAuth,UserStreamHelper.CreateStream(UserAck.Success, userInfoData));
-                //等待接收登入是否成功
-                if (!ReceivedLogin())
-                {
-                    Console.WriteLine("Login Fail, will close connect.");
-                    SocketClient.Close();
-                }
-
-                //登入成功才會進入監聽結果
+                //進入監聽
                 ThreadClient = new Thread(ReceiveCommand);
                 ThreadClient.IsBackground = true;
-                ThreadClient.Start();
+                ThreadClient.Start(SocketClient);
 
+                //送出帳號密碼 要改成用專用送出
+                SendCommand(SocketClient, Command.LoginAuth, UserReqLoginPayload.CreatePayload(userInfoData));
+
+                while(isLoginSuccess)
+                {
+                    //等待驗證中
+                }
                 Console.WriteLine("Please Type Anything 'Press Enter'：");
-                //輸送所有指令給伺服器
                 while (true)
                 {
                     string sendStr = Console.ReadLine();
-                    //ClientSendMsg(sendStr);
+                    SendMsgOnce(SocketClient, Command.GetMsgOnce, sendStr);
                 }
+
             }
             catch (Exception ex)
             {
@@ -83,37 +80,11 @@ namespace Client
             }
         }
 
-        private void ConfigureTcpSocket(Socket tcpSocket)
-        {
-            // Don't allow another socket to bind to this port.
-            tcpSocket.ExclusiveAddressUse = true;
-
-            // The socket will linger for 10 seconds after
-            // Socket.Close is called.
-            tcpSocket.LingerState = new LingerOption(true, 10);
-
-            // Disable the Nagle Algorithm for this tcp socket.
-            tcpSocket.NoDelay = true;
-
-            // Set the receive buffer size to 8k
-            tcpSocket.ReceiveBufferSize = 8192;
-
-            // Set the timeout for synchronous receive methods to
-            // 1 second (1000 milliseconds.)
-            tcpSocket.ReceiveTimeout = 1000;
-
-            // Set the send buffer size to 8k.
-            tcpSocket.SendBufferSize = 8192;
-
-            // Set the timeout for synchronous send methods
-            // to 1 second (1000 milliseconds.)
-            tcpSocket.SendTimeout = 1000;
-        }
-
         private void InitCommandMapping()
         {
-            CommandRespDict = new Dictionary<byte, Func<Socket, byte[] , bool>>()
+            CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>()
             {
+                { (byte)Command.LoginAuth, ReceivedLogin},
                 { (byte)Command.GetMsgAll, ReceviveAllMessage},
                 { (byte)Command.GetMsgOnce, ReceviveAllMessage},
             };
@@ -178,10 +149,11 @@ namespace Client
                         continue;
                     };
                     //過濾第一個字並拿取封包長度去掉Command的部分
-                    mappingFunc(socket, buffer.Skip(CommandStreamHelper.CommandSize).Take(length - CommandStreamHelper.CommandSize).ToArray());
+                    mappingFunc(socket, buffer.Skip(CommandStreamHelper.CommandSize).Take(length).ToArray());
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Console.WriteLine(ex.Message);
                     Console.WriteLine($"Packet has problem.");
                     socket.Close();
                     break;
@@ -189,56 +161,48 @@ namespace Client
             }
         }
 
-        private bool ReceivedLogin()
+        private void ReceivedLogin(Socket socket,byte[] DataArray)
         {
-            bool isLoginSuccess = false;
-            while (true)
+            UserRespLoginPayload.ParsePayload(DataArray, out var ack);
+            if (ack != UserAck.Success)
             {
-                try
-                {
-                    byte[] buffer = new byte[4];
-
-                    SocketClient.Receive(buffer);
-                    UserStreamHelper.GetAck(buffer, out var ack);
-                    if (ack != UserAck.Success)
-                    {
-                        Console.WriteLine($"{nameof(ReceivedLogin)} Fail, Ack={ack}");
-                        isLoginSuccess = false;
-                        break;
-                    }
-
-                    isLoginSuccess = true;
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Server is disconnect！{ex.Message}");
-                    break;
-                }
+                Console.WriteLine($"{nameof(ReceivedLogin)} Fail, Ack={ack}");
+                //重新輸入帳密並登入 暫時不限次數
+                Console.WriteLine($"Please check you Id and Password.");
+                CheckAndGenUserInfo(out var userInfoData);
+                SendCommand(socket, Command.LoginAuth, UserReqLoginPayload.CreatePayload(userInfoData));
+                return;
             }
-            return isLoginSuccess;
+            isLoginSuccess = true;
         }
 
-        private bool ReceviveAllMessage(Socket socket, byte[] byteArray)
+        private void ReceviveAllMessage(Socket socket, byte[] byteArray)
         {
              MessageStreamHelper.GetStream(byteArray, out var ack, out var infoDatas);
 
             if (ack != MessageAck.Success)
             {
                 Console.WriteLine($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
-                return false;
             }
             
             foreach (MessageInfoData infoData in infoDatas)
             {
                 Console.WriteLine($"Msg:{infoData.Message}");
             }
-            return true;
         }
 
-        private void ClientSendMsg(Socket socket, Command command, string sendMsg)
+        private void SendMsgOnce(Socket socket, Command command, string sendMsg)
         {
             //轉換成物件再送出
+            var infoDatas = new MessageInfoData[]
+            {
+                new MessageInfoData
+                {
+                    Message = sendMsg,
+                }
+            };
+            
+            SendCommand(SocketClient, command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas));
         }
     }
 }

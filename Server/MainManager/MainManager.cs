@@ -38,6 +38,7 @@ namespace Server.MainManager
         static Dictionary<string, Socket> ClientConnectDict = new Dictionary<string, Socket>();
         static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict = new Dictionary<byte, Action<Socket,byte[]>>();
         static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
+        static int UsePort = GlobalSetting.PortNum1;
 
         public void Start()
         {
@@ -45,9 +46,8 @@ namespace Server.MainManager
             InitCommandMapping();
             //IPAddress ip = IPAddress.Parse(hostIP);
             IPAddress ip = IPAddress.Any;
-            int port = GlobalSetting.PortNum1;
             if (PortInUse(GlobalSetting.PortNum1)){
-                port = GlobalSetting.PortNum2;
+                UsePort = GlobalSetting.PortNum2;
             }
 
             if (PortInUse(GlobalSetting.PortNum1) && PortInUse(GlobalSetting.PortNum2))
@@ -56,14 +56,14 @@ namespace Server.MainManager
                 Console.ReadKey();
                 return;
             }
-            Console.WriteLine($"Port use {port}");
+            Console.WriteLine($"Port use {UsePort}");
             //綁定到IPEndPoint上
-            IPEndPoint ipe = new IPEndPoint(ip, port);
+            IPEndPoint ipe = new IPEndPoint(ip, UsePort);
 
             Sockets = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             Sockets.Bind(ipe);
             //最多連入數量
-            Sockets.Listen(50);
+            Sockets.Listen(100);
 
             //去Redis//DB產生假的資料
             InitFakeData();
@@ -73,7 +73,7 @@ namespace Server.MainManager
             t1.IsBackground = true;
             t1.Start();
 
-            Console.WriteLine("Listing Now...");
+            Console.WriteLine("Server Start and Listen Now...");
 
             while (true)
             {
@@ -96,6 +96,7 @@ namespace Server.MainManager
             {
                 { (byte)Command.LoginAuth, ReceviveLoginAuthData},
                 { (byte)Command.GetMsgOnce, ReceviveOneMessage},
+                { (byte)Command.LoginKick, RecevivecKick},
             };
         }
 
@@ -121,6 +122,7 @@ namespace Server.MainManager
                 }
                 catch (Exception)
                 {
+                    //如果出錯就移除該用戶在連線表的資訊並移除該用戶的連線
                     ClientConnectDict.Remove(socket.RemoteEndPoint.ToString());
                     Console.WriteLine($"Client:{socket.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
                     socket.Close();
@@ -131,57 +133,95 @@ namespace Server.MainManager
 
         private void ReceviveLoginAuthData(Socket socket, byte[] byteArray)
         {
-            UserStreamHelper.GetStream(byteArray, out var ackCode, out var infoData);
+            UserReqLoginPayload.ParsePayload(byteArray, out var infoData);
             Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
             //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
-            ackCode = UserAck.Success;
+            //而且要驗證這帳號有沒有在裡面 有的話就踢掉另一邊的連線
+            var id = infoData.UserId;
+            var pw = infoData.UserPwd;
+            var ackCode = UserAck.Success;
             if (infoData.UserId != "999")
             {
                 ackCode = UserAck.AuthFail;
             }
+            //驗證成功就通知另一個伺服器把人踢了
+            //SendCommandForServer(Encoding.UTF8.GetBytes(socket.RemoteEndPoint.ToString()));
             //回傳成功訊息給對應的人
-            SendCommand(socket, Command.LoginAuth, UserStreamHelper.CreateAck(ackCode));
+            SendCommand(socket, Command.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode));
             //回傳留言版資料
             if (tempMsg.Count != 0)
             {
-                SendCommand(socket, Command.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray()));
+                //SendCommand(socket, Command.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray()));
             }
         }
 
         private void ReceviveOneMessage(Socket socket, byte[] byteArray)
         {
-            while (true)
+            MessageStreamHelper.GetStream(byteArray, out var ackCode, out var infoDatas);
+            //理論上只有第一筆訊息 懶得分開寫
+            //驗證訊息用而已 連這段轉換都不用寫
+            string receviedStr = infoDatas[0].Message;
+            Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
+            if (ClientConnectDict.Count > 0)
             {
-                try
+                foreach (var socketTemp in ClientConnectDict)
                 {
-                    //這邊還沒改 也要弄成對應的command/func
-                    //這邊有包含玩家資料 所以要小心
-                    string receviedStr = Encoding.UTF8.GetString(byteArray);
-
-                    Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
-
-                    if (ClientConnectDict.Count > 0)
-                    {
-                        foreach (var socketTemp in ClientConnectDict)
-                        {
-                            if (socketTemp.Key == socket.RemoteEndPoint.ToString()) continue;
-                            socketTemp.Value.Send(Encoding.UTF8.GetBytes($"[{socket.RemoteEndPoint}]:{receviedStr}"));
-                        }
-                    }
+                    //不傳送給發話人
+                    if (socketTemp.Key == socket.RemoteEndPoint.ToString()) continue;
+                    //伺服器接收到的資料
+                    SendCommand(socketTemp.Value, Command.GetMsgOnce, byteArray);
                 }
-                catch (Exception)
-                {
-                    ClientConnectDict.Remove(socket.RemoteEndPoint.ToString());
-                    Console.WriteLine($"Client:{socket.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-                    socket.Close();
-                    break;
-                }
-            }
+            }                
+        }
+
+        private void RecevivecKick(Socket socket, byte[] byteArray)
+        {
+            ClientConnectDict.TryGetValue(Encoding.UTF8.GetString(byteArray),out var socketTemp);
+            ClientConnectDict.Remove(socketTemp.RemoteEndPoint.ToString());
+            Console.WriteLine($"Client:{socketTemp.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
+            socketTemp.Close();
         }
 
         private void SendCommand(Socket socket, Command command, byte[] dataArray)
         {
             socket.Send(CommandStreamHelper.CreateCommandAndData(command, dataArray));
+        }
+
+        private void SendCommandForServer(byte[] dataArray)
+        {
+            try
+            {
+                IPAddress ip = IPAddress.Parse(GlobalSetting.LocalIP);
+                int ohterServerPort = GlobalSetting.PortNum1;
+                if (PortInUse(UsePort))
+                {
+                    ohterServerPort = GlobalSetting.PortNum2;
+                }
+                IPEndPoint ipe = new IPEndPoint(ip, ohterServerPort);
+                
+                var socketServer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                if (!socketServer.Connected)
+                {
+                    try
+                    {
+                        socketServer.Connect(ipe);
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine("Connect OtherServer Fail.");
+                        Console.ReadLine();
+                        return;
+                    }
+                }
+
+                //SendCommand(socketServer, Command.LoginKick, dataArray);
+                
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                Console.ReadLine();
+            }
         }
 
         private void Connecting()

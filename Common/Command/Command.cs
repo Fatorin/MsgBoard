@@ -11,5 +11,6 @@ namespace Common.Command
         LoginAuth,
         GetMsgAll,
         GetMsgOnce,
+        LoginKick,
     }
 }
