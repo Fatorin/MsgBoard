@@ -4,24 +4,40 @@ using Common.Setting;
 using Common.User;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace Client
 {
-    class CreateClient
+    public partial class Client : Form
     {
         static Thread ThreadClient = null;
         static Socket SocketClient = null;
         static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>();
         static bool isLoginSuccess;
-        public void Start()
+        public Client()
+        {
+            InitializeComponent();
+            InitCommandMapping();
+        }
+
+        private void btnLogin_Click(object sender, EventArgs e)
+        {
+            Login();
+        }
+
+        public void Login()
         {
             //懶得寫負載平衡 先這樣
+            btnLogin.Enabled = false;
             var rand = new Random().Next(1, 3);
             int serverPort;
             if (rand == 1)
@@ -32,9 +48,7 @@ namespace Client
             {
                 serverPort = GlobalSetting.PortNum2;
             }
-            InitCommandMapping();
-            //輸入帳密判斷
-            CheckAndGenUserInfo(out var userInfoData);
+
             try
             {
                 IPAddress ip = IPAddress.Parse(GlobalSetting.LocalIP);
@@ -48,7 +62,7 @@ namespace Client
                 }
                 catch (Exception)
                 {
-                    Console.WriteLine("Connect Fail.");
+                    ShowLogOnResult("Connect Fail.");
                     Console.ReadLine();
                     return;
                 }
@@ -57,29 +71,16 @@ namespace Client
                 ThreadClient = new Thread(ReceiveCommand);
                 ThreadClient.IsBackground = true;
                 ThreadClient.Start(SocketClient);
-
                 //送出帳號密碼 要改成用專用送出
-                SendCommand(SocketClient, Command.LoginAuth, UserReqLoginPayload.CreatePayload(userInfoData));
-
-                while(isLoginSuccess)
-                {
-                    //等待驗證中
-                }
-                Console.WriteLine("Please Type Anything 'Press Enter'：");
-                while (true)
-                {
-                    string sendStr = Console.ReadLine();
-                    SendMsgOnce(SocketClient, Command.GetMsgOnce, sendStr);
-                }
+                SendCommand(SocketClient, Command.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo()));
 
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                ShowLogOnResult(ex.Message);
                 Console.ReadLine();
             }
         }
-
         private void InitCommandMapping()
         {
             CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>()
@@ -89,43 +90,7 @@ namespace Client
                 { (byte)Command.GetMsgOnce, ReceviveAllMessage},
             };
         }
-        private void CheckAndGenUserInfo(out UserInfoData infoData)
-        {
-            Console.WriteLine("Welcome use message board.");
-            Console.WriteLine("Please Enter Your ID");
-            var userId = Console.ReadLine();
-            Console.WriteLine("Please Enter Your Password");
-            var userPwd = "";
-            do
-            {
-                ConsoleKeyInfo key = Console.ReadKey(true);
-                // Backspace Should Not Work
-                if (key.Key != ConsoleKey.Backspace && key.Key != ConsoleKey.Enter)
-                {
-                    userPwd += key.KeyChar;
-                    Console.Write("*");
-                }
-                else
-                {
-                    if (key.Key == ConsoleKey.Backspace && userPwd.Length > 0)
-                    {
-                        userPwd = userPwd.Substring(0, (userPwd.Length - 1));
-                        Console.Write("\b \b");
-                    }
-                    else if (key.Key == ConsoleKey.Enter)
-                    {
-                        Console.WriteLine();
-                        break;
-                    }
-                }
-            } while (true);
 
-            infoData = new UserInfoData
-            {
-                UserId = userId,
-                UserPwd = userPwd,
-            };
-        }
         private void SendCommand(Socket socket, Command command, byte[] dataArray)
         {
             socket.Send(CommandStreamHelper.CreateCommandAndData(command, dataArray));
@@ -144,7 +109,7 @@ namespace Client
                     buffer.GetCommand(out var command);
                     if (!CommandRespDict.TryGetValue((byte)command, out var mappingFunc))
                     {
-                        Console.WriteLine("Not found mapping function.");
+                        ShowLogOnResult("Not found mapping function.");
                         //不接受這個封包
                         continue;
                     };
@@ -153,41 +118,40 @@ namespace Client
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(ex.Message);
-                    Console.WriteLine($"Packet has problem.");
+                    ShowLogOnResult(ex.Message);
+                    ShowLogOnResult($"Packet has problem.");
                     socket.Close();
                     break;
                 }
             }
         }
 
-        private void ReceivedLogin(Socket socket,byte[] DataArray)
+        private void ReceivedLogin(Socket socket, byte[] DataArray)
         {
             UserRespLoginPayload.ParsePayload(DataArray, out var ack);
             if (ack != UserAck.Success)
             {
-                Console.WriteLine($"{nameof(ReceivedLogin)} Fail, Ack={ack}");
+                ShowLogOnResult($"{nameof(ReceivedLogin)} Fail, Ack={ack}");
                 //重新輸入帳密並登入 暫時不限次數
-                Console.WriteLine($"Please check you Id and Password.");
-                CheckAndGenUserInfo(out var userInfoData);
-                SendCommand(socket, Command.LoginAuth, UserReqLoginPayload.CreatePayload(userInfoData));
+                ShowLogOnResult($"Please check you Id and Password.");
                 return;
             }
-            isLoginSuccess = true;
+
+            ShowLogOnResult("Please Type Anything 'Press Enter'：");
         }
 
         private void ReceviveAllMessage(Socket socket, byte[] byteArray)
         {
-             MessageStreamHelper.GetStream(byteArray, out var ack, out var infoDatas);
+            MessageStreamHelper.GetStream(byteArray, out var ack, out var infoDatas);
 
             if (ack != MessageAck.Success)
             {
-                Console.WriteLine($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
+                ShowLogOnResult($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
             }
-            
+
             foreach (MessageInfoData infoData in infoDatas)
             {
-                Console.WriteLine($"Msg:{infoData.Message}");
+                ShowLogOnResult($"Msg:{infoData.Message}");
             }
         }
 
@@ -201,8 +165,31 @@ namespace Client
                     Message = sendMsg,
                 }
             };
-            
+
             SendCommand(SocketClient, command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas));
         }
+
+        private void ShowLogOnResult(string str)
+        {
+            tbResult.Text = tbResult.Text + str + Environment.NewLine;
+        }
+
+        private UserInfoData GenUserInfo()
+        {
+            ShowLogOnResult($"id={tbUID.Text},pw={tbPW.Text}");
+            var infoData = new UserInfoData
+            {
+                UserId = tbUID.Text,
+                UserPwd = tbPW.Text,
+            };
+            return infoData;
+        }
+
+        private void SetLoginAndSendUI(bool showLogin,bool showSend)
+        {
+            gbLogin.Visible = showLogin;
+            gbInput.Visible = showSend;
+        }
+
     }
 }
