@@ -14,6 +14,8 @@ using Newtonsoft.Json;
 using Common.User;
 using Common.Command;
 using System.Linq;
+using System.IO.Pipes;
+using Common.StreamString;
 
 namespace Server.MainManager
 {
@@ -145,7 +147,7 @@ namespace Server.MainManager
                 ackCode = UserAck.AuthFail;
             }
             //驗證成功就通知另一個伺服器把人踢了
-            //SendCommandForServer(Encoding.UTF8.GetBytes(socket.RemoteEndPoint.ToString()));
+            //要重寫與另一個SERVER溝通的方法
             //回傳成功訊息給對應的人
             SendCommand(socket, Command.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode));
             //回傳留言版資料
@@ -187,41 +189,13 @@ namespace Server.MainManager
             socket.Send(CommandStreamHelper.CreateCommandAndData(command, dataArray));
         }
 
-        private void SendCommandForServer(byte[] dataArray)
+        private void BroadcastAllServer()
         {
-            try
+            var channel = RedisHelper.Connection.GetSubscriber().Subscribe("messages");
+            channel.OnMessage(message =>
             {
-                IPAddress ip = IPAddress.Parse(GlobalSetting.LocalIP);
-                int ohterServerPort = GlobalSetting.PortNum1;
-                if (PortInUse(UsePort))
-                {
-                    ohterServerPort = GlobalSetting.PortNum2;
-                }
-                IPEndPoint ipe = new IPEndPoint(ip, ohterServerPort);
-                
-                var socketServer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                if (!socketServer.Connected)
-                {
-                    try
-                    {
-                        socketServer.Connect(ipe);
-                    }
-                    catch (Exception)
-                    {
-                        Console.WriteLine("Connect OtherServer Fail.");
-                        Console.ReadLine();
-                        return;
-                    }
-                }
-
-                //SendCommand(socketServer, Command.LoginKick, dataArray);
-                
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-                Console.ReadLine();
-            }
+                Console.WriteLine((string)message.Message);
+            });
         }
 
         private void Connecting()
