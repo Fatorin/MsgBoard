@@ -16,5 +16,17 @@ namespace ClinetForm
         {
             InitializeComponent();
         }
+
+        private void label1_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void btnLogin_Click(object sender, EventArgs e)
+        {
+            var id = tbUID.Text;
+            var pw = tbPW.Text;
+            tbResult.Text = $"id={id},pw={pw}";
+        }
     }
 }
