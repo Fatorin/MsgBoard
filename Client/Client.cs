@@ -19,19 +19,19 @@ namespace Client
 {
     public partial class Client : Form
     {
-        static Thread ThreadClient = null;
-        static Socket SocketClient = null;
         static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>();
-        static bool isLoginSuccess;
-        public Client()
-        {
-            InitializeComponent();
-            InitCommandMapping();
-        }
+
 
         private void btnLogin_Click(object sender, EventArgs e)
         {
             Login();
+        }
+
+
+        public Client()
+        {
+            InitializeComponent();
+            InitCommandMapping();
         }
 
         public void Login()
@@ -51,28 +51,9 @@ namespace Client
 
             try
             {
-                IPAddress ip = IPAddress.Parse(GlobalSetting.LocalIP);
-                IPEndPoint ipe = new IPEndPoint(ip, serverPort);
-
-                SocketClient = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-
-                try
-                {
-                    SocketClient.Connect(ipe);
-                }
-                catch (Exception)
-                {
-                    ShowLogOnResult("Connect Fail.");
-                    Console.ReadLine();
-                    return;
-                }
-
-                //進入監聽
-                ThreadClient = new Thread(ReceiveCommand);
-                ThreadClient.IsBackground = true;
-                ThreadClient.Start(SocketClient);
+                
                 //送出帳號密碼 要改成用專用送出
-                SendCommand(SocketClient, Command.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo()));
+                SendCommand(, Command.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo()));
 
             }
             catch (Exception ex)
@@ -89,11 +70,6 @@ namespace Client
                 { (byte)Command.GetMsgAll, ReceviveAllMessage},
                 { (byte)Command.GetMsgOnce, ReceviveAllMessage},
             };
-        }
-
-        private void SendCommand(Socket socket, Command command, byte[] dataArray)
-        {
-            socket.Send(CommandStreamHelper.CreateCommandAndData(command, dataArray));
         }
 
         private void ReceiveCommand(object socketClient)
@@ -185,7 +161,7 @@ namespace Client
             return infoData;
         }
 
-        private void SetLoginAndSendUI(bool showLogin,bool showSend)
+        private void SetLoginAndSendUI(bool showLogin, bool showSend)
         {
             gbLogin.Visible = showLogin;
             gbInput.Visible = showSend;
