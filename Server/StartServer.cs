@@ -20,7 +20,7 @@ namespace Server
     class StartServer
     {
         private static Dictionary<string, Socket> ClientConnectDict;
-        private static Dictionary<int, Action<Socket,byte[]>> CommandRespDict;
+        private static Dictionary<int, Action<Socket, byte[]>> CommandRespDict;
         private static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
         private static int UsePort;
 
@@ -126,6 +126,8 @@ namespace Server
                         state.isCorrectPack = true;
                         //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
                         state.PacketNeedReceiveLen = dataLen;
+                        //設定接收封包大小
+                        state.infoBytes = new byte[dataLen];
                         //設定封包的指令(第一次的時候)
                         state.Command = command;
                     }
@@ -139,7 +141,7 @@ namespace Server
                 //減去已收到的封包數
                 //將收到的封包複製到infoBytes，從最後收到的位置
                 state.PacketNeedReceiveLen -= bytesRead;
-                state.buffer.CopyTo(state.infoBytes, state.LastReceivedPos);
+                Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
                 //接收完後更新對應的LastReceivedPos
                 state.LastReceivedPos += bytesRead;
 
@@ -157,7 +159,7 @@ namespace Server
 
                     };
                     //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
-                    mappingFunc(handler,state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                    mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
                 }
                 else
                 {
@@ -197,7 +199,7 @@ namespace Server
         }
         #endregion
 
-        private static void ReceviveLoginAuthData(Socket handler,byte[] byteArray)
+        private static void ReceviveLoginAuthData(Socket handler, byte[] byteArray)
         {
             UserReqLoginPayload.ParsePayload(byteArray, out var infoData);
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
@@ -317,7 +319,8 @@ namespace Server
 
         private static void InitMapping()
         {
-            CommandRespDict = new Dictionary<int, Action<Socket,byte[]>>()
+            ClientConnectDict = new Dictionary<string, Socket>();
+            CommandRespDict = new Dictionary<int, Action<Socket, byte[]>>()
                 {
                     { (int)CommandEnum.LoginAuth, ReceviveLoginAuthData},
                     { (int)CommandEnum.GetMsgOnce, ReceviveOneMessage},
