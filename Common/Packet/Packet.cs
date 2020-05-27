@@ -21,7 +21,6 @@ namespace Common.Packet
             crcByte.CopyTo(packByte, 0);
             BitConverter.GetBytes(IPAddress.HostToNetworkOrder(packByte.Length)).CopyTo(packByte, 4);
             commandByte.CopyTo(packByte, 8);
-            dataByte.Reverse();
             dataByte.CopyTo(packByte, 12);
             Console.WriteLine($"Pack length ={packByte.Length}");
             return packByte;
