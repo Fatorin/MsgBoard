@@ -46,7 +46,8 @@ namespace Server.MainManager
         {
             //初始化對應的Command
             InitCommandMapping();
-            //IPAddress ip = IPAddress.Parse(hostIP);
+            AsynchronousSocketListener.StartListening();
+            /*//IPAddress ip = IPAddress.Parse(hostIP);
             IPAddress ip = IPAddress.Any;
             if (PortInUse(GlobalSetting.PortNum1)){
                 UsePort = GlobalSetting.PortNum2;
@@ -89,7 +90,7 @@ namespace Server.MainManager
                 {
                     Console.WriteLine("Not support command.");
                 }
-            }
+            }*/
         }
 
         private void InitCommandMapping()
