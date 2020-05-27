@@ -33,6 +33,8 @@ namespace Server
             public byte[] buffer = new byte[BufferSize];
 
             public int PacketNeedReceiveLen;
+            public byte[] infoBytes;
+            public bool isCorrectPack = false;
         }
 
         public class AsynchronousSocketListener
@@ -107,8 +109,6 @@ namespace Server
 
             public static void ReadCallback(IAsyncResult ar)
             {
-                String content = String.Empty;
-                
                 // Retrieve the state object and the handler socket  
                 // from the asynchronous state object.  
                 StateObject state = (StateObject)ar.AsyncState;
@@ -119,33 +119,52 @@ namespace Server
                 //如果有收到的封包才會做事情
                 if (bytesRead > 0)
                 {
-                    // There  might be more data, so store the data received so far.
-
-                    // Check for end-of-file tag. If it is not there, read
-                    // more data.  
                     //如果收到結束符號才會停止
                     //檢查有沒有CRC 有的話再嘗試接收封包 不然就拒絕
                     //檢查封包長度 傳值給PacketLength
                     //定義PacketLength
                     //如果資料少於PacketLength，會持續接收，並減少前面接收的長度
                     //如果資料都收完了，那麼會結束判斷，並做後續的動作
-                    if (state.PacketNeedReceiveLen == 0)
+                    //DO SOMETHING FOR PACK LEN
+
+                    if (!state.isCorrectPack)
                     {
-                        //如果封包長度是0，那要接收
+                        //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
+                        //如果沒有CRC那就直接拒絕接收
+                        int crc = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 0));
+                        int dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 4));
+                        if (crc == Packet.crcCode)
+                        {
+                            //設定封包驗證通過(如果有要接收第二段就會繼續接收
+                            state.isCorrectPack = true;
+                            //設定封包的長度(第一次的時候)
+                            state.PacketNeedReceiveLen = dataLen;
+                        }
+                        else
+                        {
+                            //如果CRC不對就直接斷線
+                            Console.WriteLine("CRC check fail, close socket.");
+                            handler.Shutdown(SocketShutdown.Both);
+                            handler.Close();
+                        }
                     }
-                    //改成收到結束的長度才會結束
-                    if (content.IndexOf("<EOF>") > -1)
+                    //減去已收到的封包數
+                    state.PacketNeedReceiveLen -= bytesRead;
+                    //如果封包都收完了 則執行動作
+                    if (state.PacketNeedReceiveLen == 0)
                     {
                         // All the data has been read from the
                         // client. Display it on the console.  
-                        Console.WriteLine("Read {0} bytes from socket. \n Data : {1}",
-                            content.Length, content);
-                        // Echo the data back to the client.  
-                        Send(handler, content);
+                        Console.WriteLine("Read {0} bytes from socket.",
+                            state.infoBytes.Length);
+                        
+                        //執行對應的FUNC，並使用該Socket傳送給對應的人
+
+                        //Send(handler, "");
                     }
                     else
                     {
-                        // Not all data received. Get more.  
+                        // Not all data received. Get more.
                         handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
                         new AsyncCallback(ReadCallback), state);
                     }

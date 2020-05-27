@@ -53,7 +53,7 @@ namespace Client
             {
                 
                 //送出帳號密碼 要改成用專用送出
-                SendCommand(, Command.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo()));
+                //SendCommand(, Command.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo()));
 
             }
             catch (Exception ex)
@@ -142,7 +142,7 @@ namespace Client
                 }
             };
 
-            SendCommand(SocketClient, command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas));
+            //SendCommand(SocketClient, command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas));
         }
 
         private void ShowLogOnResult(string str)

@@ -8,12 +8,12 @@ namespace Common.Packet
 {
     public class Packet
     {
+        public static readonly int crcCode = 65517;
         public static byte[] BuildPacket(int command, byte[] dataByte)
         {
             //定義
             //CRC, command , data
             //依序存入crc len cmd data
-            int crcCode = 65517; //#FFED
             byte[] crcByte = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(crcCode));
             byte[] commandByte = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(command));
             byte[] dataLen = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(crcByte.Length + commandByte.Length + dataByte.Length));
