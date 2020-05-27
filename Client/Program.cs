@@ -19,4 +19,5 @@ namespace Client
             Application.Run(new Client());
         }
     }
+
 }
