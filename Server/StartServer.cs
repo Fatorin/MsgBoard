@@ -377,7 +377,7 @@ namespace Server
         {
             UsePort = GlobalSetting.PortNum1;
             Init();
-            if (PortInUse(GlobalSetting.PortNum1))
+            /*if (PortInUse(GlobalSetting.PortNum1))
             {
                 UsePort = GlobalSetting.PortNum2;
             }
@@ -387,7 +387,7 @@ namespace Server
                 Console.WriteLine("Port are used.");
                 Console.ReadKey();
                 return;
-            }
+            }*/
 
             Console.WriteLine($"Port use {UsePort}");
 

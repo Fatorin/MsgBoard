@@ -40,14 +40,15 @@ namespace Client
             //懶得寫負載平衡 先這樣
             btnLogin.Enabled = false;
             var rand = new Random().Next(1, 3);
-            if (rand == 1)
+            serverPort = GlobalSetting.PortNum1;
+            /*if (rand == 1)
             {
                 serverPort = GlobalSetting.PortNum1;
             }
             else
             {
                 serverPort = GlobalSetting.PortNum2;
-            }
+            }*/
 
             StartClient();
             
