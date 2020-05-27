@@ -6,7 +6,7 @@ using System.Text;
 namespace Common.Command
 {
     
-    public enum Command : byte
+    public enum CommandEnum
     {
         LoginAuth,
         GetMsgAll,

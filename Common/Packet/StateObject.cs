@@ -18,5 +18,6 @@ namespace Common.Packet
         public byte[] infoBytes;
         public bool isCorrectPack = false;
         public int LastReceivedPos;
+        public int Command;
     }
 }

@@ -20,8 +20,9 @@ namespace Client
 {
     public partial class Client : Form
     {
-        static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>();
+        static Dictionary<int, Action<byte[]>> CommandRespDict = new Dictionary<int, Action<byte[]>>();
         static int serverPort;
+        static Socket socketClient;
 
         public Client()
         {
@@ -49,49 +50,26 @@ namespace Client
             }
 
             StartClient();
+            
+            // Send test data to the remote device.  
+            Send(socketClient, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo())));
+            sendDone.WaitOne();
 
+            // Receive the response from the remote device.  
+            Receive(socketClient);
+            receiveDone.WaitOne();
         }
         private void InitCommandMapping()
         {
-            CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>()
+            CommandRespDict = new Dictionary<int, Action<byte[]>>()
             {
-                { (byte)Command.LoginAuth, ReceivedLogin},
-                { (byte)Command.GetMsgAll, ReceviveAllMessage},
-                { (byte)Command.GetMsgOnce, ReceviveAllMessage},
+                { (int)CommandEnum.LoginAuth, ReceivedLogin},
+                { (int)CommandEnum.GetMsgAll, ReceviveAllMessage},
+                { (int)CommandEnum.GetMsgOnce, ReceviveAllMessage},
             };
         }
 
-        private void ReceiveCommand(object socketClient)
-        {
-            Socket socket = (Socket)socketClient;
-            while (true)
-            {
-                try
-                {
-                    //先接收指令類別，然後將對應的資料傳給對應的Func
-                    byte[] buffer = new byte[8192];
-                    int length = socket.Receive(buffer);
-                    buffer.GetCommand(out var command);
-                    if (!CommandRespDict.TryGetValue((byte)command, out var mappingFunc))
-                    {
-                        ShowLogOnResult("Not found mapping function.");
-                        //不接受這個封包
-                        continue;
-                    };
-                    //過濾第一個字並拿取封包長度去掉Command的部分
-                    mappingFunc(socket, buffer.Skip(CommandStreamHelper.CommandSize).Take(length).ToArray());
-                }
-                catch (Exception ex)
-                {
-                    ShowLogOnResult(ex.Message);
-                    ShowLogOnResult($"Packet has problem.");
-                    socket.Close();
-                    break;
-                }
-            }
-        }
-
-        private void ReceivedLogin(Socket socket, byte[] DataArray)
+        private void ReceivedLogin(byte[] DataArray)
         {
             UserRespLoginPayload.ParsePayload(DataArray, out var ack);
             if (ack != UserAck.Success)
@@ -105,7 +83,7 @@ namespace Client
             ShowLogOnResult("Please Type Anything 'Press Enter'：");
         }
 
-        private void ReceviveAllMessage(Socket socket, byte[] byteArray)
+        private void ReceviveAllMessage(byte[] byteArray)
         {
             MessageStreamHelper.GetStream(byteArray, out var ack, out var infoDatas);
 
@@ -120,7 +98,7 @@ namespace Client
             }
         }
 
-        private void SendMsgOnce(Socket socket, Command command, string sendMsg)
+        private void SendMsgOnce(Socket socket, CommandEnum command, string sendMsg)
         {
             //轉換成物件再送出
             var infoDatas = new MessageInfoData[]
@@ -131,7 +109,8 @@ namespace Client
                 }
             };
 
-            //SendCommand(SocketClient, command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas));
+            Send(socketClient, Packet.BuildPacket((int)command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas)));
+            sendDone.WaitOne();
         }
 
         private void ShowLogOnResult(string str)
@@ -176,35 +155,19 @@ namespace Client
             {
                 // Establish the remote endpoint for the socket.  
                 // The name of the
-                // remote device is "host.contoso.com".  
-                IPHostEntry ipHostInfo = Dns.GetHostEntry("172.31.10.21");
+                // remote device is "host.contoso.com".
+                IPHostEntry ipHostInfo = Dns.GetHostEntry("127.0.0.1");
                 IPAddress ipAddress = ipHostInfo.AddressList[0];
                 IPEndPoint remoteEP = new IPEndPoint(ipAddress, serverPort);
 
                 // Create a TCP/IP socket.  
-                Socket client = new Socket(ipAddress.AddressFamily,
+                socketClient = new Socket(ipAddress.AddressFamily,
                     SocketType.Stream, ProtocolType.Tcp);
 
                 // Connect to the remote endpoint.  
-                client.BeginConnect(remoteEP,
-                    new AsyncCallback(ConnectCallback), client);
+                socketClient.BeginConnect(remoteEP,
+                    new AsyncCallback(ConnectCallback), socketClient);
                 connectDone.WaitOne();
-
-                // Send test data to the remote device.  
-                Send(client, "This is a test<EOF>");
-                sendDone.WaitOne();
-
-                // Receive the response from the remote device.  
-                //Receive(client);
-                //receiveDone.WaitOne();
-
-                // Write the response to the console.
-                //Console.WriteLine($"Get received.");
-
-                // Release the socket.  
-                //client.Shutdown(SocketShutdown.Both);
-                //client.Close();
-
             }
             catch (Exception e)
             {
@@ -266,7 +229,7 @@ namespace Client
 
                 if (bytesRead > 0)
                 {
-                    //收到封包後的行為先不要弄
+                    //持續收到封包直到結束
                     Console.WriteLine($"Get {bytesRead} bytes from socket.");
 
                     // Get the rest of the data.  
@@ -277,7 +240,7 @@ namespace Client
                 {
                     // All the data has arrived; put it in response.  
                     Console.WriteLine($"Read {state.infoBytes.Length} bytes from socket.");
-
+                    //收封包
                     // Signal that all bytes have been received.  
                     receiveDone.Set();
                 }
@@ -288,11 +251,8 @@ namespace Client
             }
         }
 
-        private static void Send(Socket client, String data)
+        private static void Send(Socket client, byte[] byteData)
         {
-            // Convert the string data to byte data using ASCII encoding.  
-            byte[] byteData = Encoding.ASCII.GetBytes(data);
-
             // Begin sending the data to the remote device.  
             client.BeginSend(byteData, 0, byteData.Length, 0,
                 new AsyncCallback(SendCallback), client);
@@ -316,6 +276,13 @@ namespace Client
             {
                 Console.WriteLine(e.ToString());
             }
+        }
+
+        private static void SocketShutDown(Socket socket)
+        {
+            // Release the socket.  
+            socket.Shutdown(SocketShutdown.Both);
+            socket.Close();
         }
         #endregion
     }

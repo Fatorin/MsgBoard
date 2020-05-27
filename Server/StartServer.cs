@@ -20,7 +20,7 @@ namespace Server
     class StartServer
     {
         private static Dictionary<string, Socket> ClientConnectDict;
-        private static Dictionary<byte, Action<Socket, byte[]>> CommandRespDict;
+        private static Dictionary<int, Action<Socket,byte[]>> CommandRespDict;
         private static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
         private static int UsePort;
 
@@ -86,6 +86,8 @@ namespace Server
             // Create the state object.  
             Console.WriteLine("Accept one connect.");
             StateObject state = new StateObject();
+            ClientConnectDict.Add(handler.RemoteEndPoint.ToString(), handler);
+            Console.WriteLine($"Client:{handler.RemoteEndPoint.ToString()} success. AcceptCount:{ClientConnectDict.Count}");
             state.workSocket = handler;
             handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
                 new AsyncCallback(ReadCallback), state);
@@ -117,19 +119,21 @@ namespace Server
                     //如果沒有CRC那就直接拒絕接收
                     int crc = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 0));
                     int dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 4));
+                    int command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 8));
                     if (crc == Packet.crcCode)
                     {
-                        //設定封包驗證通過(如果有要接收第二段就會繼續接收
+                        //設定封包驗證通過(如果有要接收第二段就會繼續接收)
                         state.isCorrectPack = true;
-                        //設定封包的長度(第一次的時候)
+                        //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
                         state.PacketNeedReceiveLen = dataLen;
+                        //設定封包的指令(第一次的時候)
+                        state.Command = command;
                     }
                     else
                     {
-                        //如果CRC不對就直接斷線
-                        Console.WriteLine("CRC check fail, close socket.");
-                        handler.Shutdown(SocketShutdown.Both);
-                        handler.Close();
+                        //如果CRC不對就不動作(先不關閉)
+                        Console.WriteLine("CRC check fail");
+                        return;
                     }
                 }
                 //減去已收到的封包數
@@ -146,9 +150,14 @@ namespace Server
                     // client. Display it on the console.  
                     Console.WriteLine($"Read {state.infoBytes.Length} bytes from socket.");
 
-                    //執行對應的FUNC，並使用該Socket傳送給對應的人
+                    //執行對應的FUNC
+                    if (!CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                    {
+                        Console.WriteLine("Not found mapping command function.");
 
-                    //Send(handler, "");
+                    };
+                    //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
+                    mappingFunc(handler,state.infoBytes.Skip(Packet.VerificationLen).ToArray());
                 }
                 else
                 {
@@ -159,11 +168,8 @@ namespace Server
             }
         }
 
-        private static void Send(Socket handler, String data)
+        private static void Send(Socket handler, byte[] byteData)
         {
-            // Convert the string data to byte data using ASCII encoding.  
-            byte[] byteData = Encoding.ASCII.GetBytes(data);
-
             // Begin sending the data to the remote device.  
             handler.BeginSend(byteData, 0, byteData.Length, 0,
                 new AsyncCallback(SendCallback), handler);
@@ -180,8 +186,8 @@ namespace Server
                 int bytesSent = handler.EndSend(ar);
                 Console.WriteLine("Sent {0} bytes to client.", bytesSent);
 
-                handler.Shutdown(SocketShutdown.Both);
-                handler.Close();
+                /*handler.Shutdown(SocketShutdown.Both);
+                handler.Close();*/
 
             }
             catch (Exception e)
@@ -191,42 +197,10 @@ namespace Server
         }
         #endregion
 
-
-        private void ReceiveCommand(object socketClient)
-        {
-            Socket socket = (Socket)socketClient;
-            while (true)
-            {
-                try
-                {
-                    //先接收指令類別，然後將對應的資料傳給對應的Func
-                    byte[] buffer = new byte[8192];
-                    int length = socket.Receive(buffer);
-                    buffer.GetCommand(out var command);
-                    if (!CommandRespDict.TryGetValue((byte)command, out var mappingFunc))
-                    {
-                        Console.WriteLine("Not found mapping function.");
-                        //不接受這個封包
-                        continue;
-                    };
-                    //過濾第一個字並拿取封包長度去掉Command的部分
-                    mappingFunc(socket, buffer.Skip(CommandStreamHelper.CommandSize).Take(length - CommandStreamHelper.CommandSize).ToArray());
-                }
-                catch (Exception)
-                {
-                    //如果出錯就移除該用戶在連線表的資訊並移除該用戶的連線
-                    ClientConnectDict.Remove(socket.RemoteEndPoint.ToString());
-                    Console.WriteLine($"Client:{socket.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-                    socket.Close();
-                    break;
-                }
-            }
-        }
-
-        private static void ReceviveLoginAuthData(Socket socket, byte[] byteArray)
+        private static void ReceviveLoginAuthData(Socket handler,byte[] byteArray)
         {
             UserReqLoginPayload.ParsePayload(byteArray, out var infoData);
-            Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
+            Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
             //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
             //而且要驗證這帳號有沒有在裡面 有的話就踢掉另一邊的連線
             var id = infoData.UserId;
@@ -239,34 +213,34 @@ namespace Server
             //驗證成功就通知另一個伺服器把人踢了
             //要重寫與另一個SERVER溝通的方法
             //回傳成功訊息給對應的人
-            SendCommand(socket, Command.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode));
+            Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode)));
             //回傳留言版資料
             if (tempMsg.Count != 0)
             {
-                //SendCommand(socket, Command.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray()));
+                Send(handler, Packet.BuildPacket((int)CommandEnum.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray())));
             }
         }
 
-        private static void ReceviveOneMessage(Socket socket, byte[] byteArray)
+        private static void ReceviveOneMessage(Socket handler, byte[] byteArray)
         {
             MessageStreamHelper.GetStream(byteArray, out var ackCode, out var infoDatas);
             //理論上只有第一筆訊息 懶得分開寫
             //驗證訊息用而已 連這段轉換都不用寫
             string receviedStr = infoDatas[0].Message;
-            Console.WriteLine($"Clinet:{socket.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
+            Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
             if (ClientConnectDict.Count > 0)
             {
                 foreach (var socketTemp in ClientConnectDict)
                 {
                     //不傳送給發話人
-                    if (socketTemp.Key == socket.RemoteEndPoint.ToString()) continue;
+                    if (socketTemp.Key == handler.RemoteEndPoint.ToString()) continue;
                     //伺服器接收到的資料
-                    SendCommand(socketTemp.Value, Command.GetMsgOnce, byteArray);
+                    Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.GetMsgOnce, byteArray));
                 }
             }
         }
 
-        private static void RecevivecKick(Socket socket, byte[] byteArray)
+        private static void RecevivecKick(Socket handler, byte[] byteArray)
         {
             ClientConnectDict.TryGetValue(Encoding.UTF8.GetString(byteArray), out var socketTemp);
             ClientConnectDict.Remove(socketTemp.RemoteEndPoint.ToString());
@@ -274,9 +248,10 @@ namespace Server
             socketTemp.Close();
         }
 
-        private static void SendCommand(Socket socket, Command command, byte[] dataArray)
+        private static void Disconnect(Socket handler)
         {
-            socket.Send(CommandStreamHelper.CreateCommandAndData(command, dataArray));
+            handler.Shutdown(SocketShutdown.Both);
+            handler.Close();
         }
 
         #region Redis//DB
@@ -342,11 +317,11 @@ namespace Server
 
         private static void InitMapping()
         {
-            CommandRespDict = new Dictionary<byte, Action<Socket, byte[]>>()
+            CommandRespDict = new Dictionary<int, Action<Socket,byte[]>>()
                 {
-                    { (byte)Command.LoginAuth, ReceviveLoginAuthData},
-                    { (byte)Command.GetMsgOnce, ReceviveOneMessage},
-                    { (byte)Command.LoginKick, RecevivecKick},
+                    { (int)CommandEnum.LoginAuth, ReceviveLoginAuthData},
+                    { (int)CommandEnum.GetMsgOnce, ReceviveOneMessage},
+                    { (int)CommandEnum.LoginKick, RecevivecKick},
                 };
         }
 

@@ -9,6 +9,7 @@ namespace Common.Packet
     public class Packet
     {
         public static readonly int crcCode = 65517;
+        public static readonly int VerificationLen = 12;
         public static byte[] BuildPacket(int command, byte[] dataByte)
         {
             //定義
