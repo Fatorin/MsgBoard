@@ -20,6 +20,7 @@ namespace Client
 {
     public partial class Client : Form
     {
+        static Dictionary<int, Action> CommandReqDict = new Dictionary<int, Action>();
         static Dictionary<int, Action<byte[]>> CommandRespDict = new Dictionary<int, Action<byte[]>>();
         static int serverPort;
         static Socket socketClient;
@@ -31,11 +32,6 @@ namespace Client
         }
 
         private void btnLogin_Click(object sender, EventArgs e)
-        {
-            Login();
-        }
-
-        public void Login()
         {
             //懶得寫負載平衡 先這樣
             btnLogin.Enabled = false;
@@ -49,19 +45,38 @@ namespace Client
             {
                 serverPort = GlobalSetting.PortNum2;
             }*/
-
-            StartClient();
-            
-            // Send test data to the remote device.  
-            Send(socketClient, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo())));
-            sendDone.WaitOne();
-
-            // Receive the response from the remote device.  
-            Receive(socketClient);
-            receiveDone.WaitOne();
+            bgWorkerGoFunc((int)CommandEnum.LoginAuth);
         }
+
+        private void bgWorkerGoFunc(int command)
+        {
+            if (bgWorkConnect.IsBusy != true)
+            {
+                bgWorkConnect.RunWorkerAsync(command);
+            }
+        }
+
+        private void bgWorkerConnect_DoWork(object sender, DoWorkEventArgs e)
+        {
+            if (!CommandReqDict.TryGetValue((int)e.Argument, out var function))
+            {
+                ShowLogOnResult("Not found mapping req function.");
+                return;
+            }
+            function();
+        }
+        private void bgWorkerConnect_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
+        {
+            ShowLogOnResult("Func Finish.");
+        }
+
         private void InitCommandMapping()
         {
+            CommandReqDict = new Dictionary<int, Action>()
+            {
+                {(int)CommandEnum.LoginAuth, StartClientAndLogin}
+            };
+
             CommandRespDict = new Dictionary<int, Action<byte[]>>()
             {
                 { (int)CommandEnum.LoginAuth, ReceivedLogin},
@@ -78,6 +93,11 @@ namespace Client
                 ShowLogOnResult($"{nameof(ReceivedLogin)} Fail, Ack={ack}");
                 //重新輸入帳密並登入 暫時不限次數
                 ShowLogOnResult($"Please check you Id and Password.");
+                SocketShutDown(socketClient);
+                btnLogin.InvokeIfRequired(() =>
+                {
+                    btnLogin.Enabled = true;
+                });
                 return;
             }
 
@@ -115,7 +135,8 @@ namespace Client
         }
 
         private void ShowLogOnResult(string str)
-        {            
+        {
+            //不同執行序的寫法
             tbResult.InvokeIfRequired(() =>
             {
                 tbResult.AppendText(str + Environment.NewLine);
@@ -149,7 +170,7 @@ namespace Client
         private static ManualResetEvent receiveDone =
             new ManualResetEvent(false);
 
-        private static void StartClient()
+        private void StartClientAndLogin()
         {
             // Connect to a remote device.  
             try
@@ -169,14 +190,22 @@ namespace Client
                 socketClient.BeginConnect(remoteEP,
                     new AsyncCallback(ConnectCallback), socketClient);
                 connectDone.WaitOne();
+
+                // Send test data to the remote device.  
+                Send(socketClient, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserReqLoginPayload.CreatePayload(GenUserInfo())));
+                sendDone.WaitOne();
+
+                // Receive the response from the remote device.  
+                Receive(socketClient);
+                receiveDone.WaitOne();
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                ShowLogOnResult(e.ToString());
             }
         }
 
-        private static void ConnectCallback(IAsyncResult ar)
+        private void ConnectCallback(IAsyncResult ar)
         {
             try
             {
@@ -186,19 +215,18 @@ namespace Client
                 // Complete the connection.  
                 client.EndConnect(ar);
 
-                Console.WriteLine("Socket connected to {0}",
-                    client.RemoteEndPoint.ToString());
+                ShowLogOnResult($"Socket connected to {client.RemoteEndPoint.ToString()}");
 
                 // Signal that the connection has been made.  
                 connectDone.Set();
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                ShowLogOnResult(e.ToString());
             }
         }
 
-        private static void Receive(Socket client)
+        private void Receive(Socket client)
         {
             try
             {
@@ -212,11 +240,11 @@ namespace Client
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                ShowLogOnResult(e.ToString());
             }
         }
 
-        private static void ReceiveCallback(IAsyncResult ar)
+        private void ReceiveCallback(IAsyncResult ar)
         {
             try
             {
@@ -231,35 +259,72 @@ namespace Client
                 if (bytesRead > 0)
                 {
                     //持續收到封包直到結束
-                    Console.WriteLine($"Get {bytesRead} bytes from socket.");
+                    ShowLogOnResult($"Get {bytesRead} bytes from socket.");
 
-                    // Get the rest of the data.  
-                    client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                    if (!state.isCorrectPack)
+                    {
+                        //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
+                        //如果沒有CRC那就直接拒絕接收
+                        Packet.UnPackParam(state.buffer, out var crc, out var dataLen, out var command);
+                        if (crc == Packet.crcCode)
+                        {
+                            //設定封包驗證通過(如果有要接收第二段就會繼續接收)
+                            state.isCorrectPack = true;
+                            //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
+                            state.PacketNeedReceiveLen = dataLen;
+                            //設定接收封包大小
+                            state.infoBytes = new byte[dataLen];
+                            //設定封包的指令(第一次的時候)
+                            state.Command = command;
+                        }
+                        else
+                        {
+                            //如果CRC不對就不動作(先不關閉)
+                            ShowLogOnResult("CRC check fail");
+                            return;
+                        }
+                    }
+                    //減去已收到的封包數
+                    //將收到的封包複製到infoBytes，從最後收到的位置
+                    state.PacketNeedReceiveLen -= bytesRead;
+                    Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
+                    //接收完後更新對應的LastReceivedPos
+                    state.LastReceivedPos += bytesRead;
+
+                    if (state.PacketNeedReceiveLen == 0)
+                    {
+                        //執行對應的FUNC
+                        if (!CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                        {
+                            ShowLogOnResult("Not found mapping command function.");
+                        };
+                        ShowLogOnResult($"Get all bytes {state.infoBytes.Length} from socket.");
+                        //接收完成
+                        receiveDone.Set();
+                        //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
+                        mappingFunc(state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                    }
+                    else
+                    {
+                        client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
                         new AsyncCallback(ReceiveCallback), state);
-                }
-                else
-                {
-                    // All the data has arrived; put it in response.  
-                    Console.WriteLine($"Read {state.infoBytes.Length} bytes from socket.");
-                    //收封包
-                    // Signal that all bytes have been received.  
-                    receiveDone.Set();
+                    }
                 }
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                ShowLogOnResult(e.ToString());
             }
         }
 
-        private static void Send(Socket client, byte[] byteData)
+        private void Send(Socket client, byte[] byteData)
         {
             // Begin sending the data to the remote device.  
             client.BeginSend(byteData, 0, byteData.Length, 0,
                 new AsyncCallback(SendCallback), client);
         }
 
-        private static void SendCallback(IAsyncResult ar)
+        private void SendCallback(IAsyncResult ar)
         {
             try
             {
@@ -268,18 +333,18 @@ namespace Client
 
                 // Complete sending the data to the remote device.  
                 int bytesSent = client.EndSend(ar);
-                Console.WriteLine("Sent {0} bytes to server.", bytesSent);
+                ShowLogOnResult($"Sent {bytesSent} bytes to server.");
 
                 // Signal that all bytes have been sent.  
                 sendDone.Set();
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                ShowLogOnResult(e.ToString());
             }
         }
 
-        private static void SocketShutDown(Socket socket)
+        private void SocketShutDown(Socket socket)
         {
             // Release the socket.  
             socket.Shutdown(SocketShutdown.Both);

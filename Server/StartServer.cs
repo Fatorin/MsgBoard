@@ -117,9 +117,7 @@ namespace Server
                 {
                     //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
                     //如果沒有CRC那就直接拒絕接收
-                    int crc = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 0));
-                    int dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 4));
-                    int command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(state.buffer, 8));
+                    Packet.UnPackParam(state.buffer, out var crc, out var dataLen, out var command);
                     if (crc == Packet.crcCode)
                     {
                         //設定封包驗證通過(如果有要接收第二段就會繼續接收)
@@ -187,10 +185,6 @@ namespace Server
                 // Complete sending the data to the remote device.  
                 int bytesSent = handler.EndSend(ar);
                 Console.WriteLine("Sent {0} bytes to client.", bytesSent);
-
-                /*handler.Shutdown(SocketShutdown.Both);
-                handler.Close();*/
-
             }
             catch (Exception e)
             {
@@ -216,8 +210,15 @@ namespace Server
             //要重寫與另一個SERVER溝通的方法
             //回傳成功訊息給對應的人
             Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode)));
+
+            if(ackCode == UserAck.AuthFail)
+            {
+                ClientConnectDict.Remove(handler.RemoteEndPoint.ToString());
+                Console.WriteLine($"Remove {handler.RemoteEndPoint.ToString()}, AcceptCount:{ClientConnectDict.Count}");
+                return;
+            }
             //回傳留言版資料
-            if (tempMsg.Count != 0)
+            if (tempMsg.Count != 0 && ackCode == UserAck.AuthFail)
             {
                 Send(handler, Packet.BuildPacket((int)CommandEnum.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray())));
             }

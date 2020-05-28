@@ -23,8 +23,14 @@ namespace Common.Packet
             BitConverter.GetBytes(IPAddress.HostToNetworkOrder(packByte.Length)).CopyTo(packByte, 4);
             commandByte.CopyTo(packByte, 8);
             dataByte.CopyTo(packByte, 12);
-            Console.WriteLine($"Pack length ={packByte.Length}");
             return packByte;
+        }
+
+        public static void UnPackParam(byte[] dataByte, out int crc, out int dataLen, out int command)
+        {
+            crc = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(dataByte, 0));
+            dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(dataByte, 4));
+            command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(dataByte, 8));
         }
     }
 }

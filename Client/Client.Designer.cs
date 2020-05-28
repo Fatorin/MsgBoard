@@ -40,6 +40,7 @@
             this.tbInput = new System.Windows.Forms.TextBox();
             this.label1 = new System.Windows.Forms.Label();
             this.btnSend = new System.Windows.Forms.Button();
+            this.bgWorkConnect = new System.ComponentModel.BackgroundWorker();
             this.gbLogin.SuspendLayout();
             this.gbInput.SuspendLayout();
             this.SuspendLayout();
@@ -155,6 +156,12 @@
             this.btnSend.Text = "Send";
             this.btnSend.UseVisualStyleBackColor = true;
             // 
+            // bgWorkConnect
+            // 
+            this.bgWorkConnect.WorkerReportsProgress = true;
+            this.bgWorkConnect.WorkerSupportsCancellation = true;
+            this.bgWorkConnect.DoWork += new System.ComponentModel.DoWorkEventHandler(this.bgWorkerConnect_DoWork);
+            // 
             // Client
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
@@ -189,6 +196,7 @@
         private System.Windows.Forms.TextBox tbInput;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Button btnSend;
+        private System.ComponentModel.BackgroundWorker bgWorkConnect;
     }
 }
 
