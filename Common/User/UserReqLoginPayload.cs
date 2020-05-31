@@ -47,6 +47,7 @@ namespace Common.User
 			if ((obj != null))
 			{
 				binaryWriter.Write(true);
+				binaryWriter.Write(obj.Id);
 				binaryWriter.Write(obj.UserId);
 				binaryWriter.Write(obj.UserPwd);
 			}
@@ -60,6 +61,7 @@ namespace Common.User
 			if ((binaryReader.ReadBoolean() == true))
 			{
 				obj = new UserInfoData();
+				obj.Id = binaryReader.ReadInt32();
 				obj.UserId = binaryReader.ReadString();
 				obj.UserPwd = binaryReader.ReadString();
 			}

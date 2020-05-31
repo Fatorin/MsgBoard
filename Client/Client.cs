@@ -303,6 +303,16 @@ namespace Client
                         receiveDone.Set();
                         //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
                         mappingFunc(state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                        //清除封包資訊 重設
+                        /*state.LastReceivedPos = 0;
+                        state.PacketNeedReceiveLen = 0;
+                        state.isCorrectPack = false;
+                        state.infoBytes = null;
+                        state.Command = 0;
+                        client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        new AsyncCallback(ReceiveCallback), state);*/
+                        Receive(socketClient);
+                        receiveDone.WaitOne();
                     }
                     else
                     {

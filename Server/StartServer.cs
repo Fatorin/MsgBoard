@@ -158,6 +158,14 @@ namespace Server
                     };
                     //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
                     mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                    //清除封包資訊 重設
+                    state.LastReceivedPos = 0;
+                    state.PacketNeedReceiveLen = 0;
+                    state.isCorrectPack = false;
+                    state.infoBytes = null;
+                    state.Command = 0;
+                    handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                    new AsyncCallback(ReadCallback), state);
                 }
                 else
                 {
@@ -199,7 +207,8 @@ namespace Server
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
             //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
             //而且要驗證這帳號有沒有在裡面 有的話就踢掉另一邊的連線
-            var id = infoData.UserId;
+            var id = infoData.Id;
+            var userid = infoData.UserId;
             var pw = infoData.UserPwd;
             var ackCode = UserAck.Success;
             if (infoData.UserId != "999")
@@ -218,7 +227,7 @@ namespace Server
                 return;
             }
             //回傳留言版資料
-            if (tempMsg.Count != 0 && ackCode == UserAck.AuthFail)
+            if (tempMsg.Count != 0 && ackCode != UserAck.AuthFail)
             {
                 Send(handler, Packet.BuildPacket((int)CommandEnum.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray())));
             }
