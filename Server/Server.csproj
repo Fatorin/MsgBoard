@@ -157,9 +157,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Migrations\20200530105834_InitialCreate.cs" />
-    <Compile Include="Migrations\20200530105834_InitialCreate.designer.cs">
-      <DependentUpon>20200530105834_InitialCreate.cs</DependentUpon>
+    <Compile Include="Migrations\20200531174517_InitialCreate.cs" />
+    <Compile Include="Migrations\20200531174517_InitialCreate.designer.cs">
+      <DependentUpon>20200531174517_InitialCreate.cs</DependentUpon>
     </Compile>
     <Compile Include="Migrations\ApplicationContextModelSnapshot.cs" />
     <Compile Include="PGSql\ApplicationContext.cs" />

@@ -14,6 +14,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Server
 {
@@ -23,6 +24,7 @@ namespace Server
         private static Dictionary<int, Action<Socket, byte[]>> CommandRespDict;
         private static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
         private static int UsePort;
+        private static PGSql.ApplicationContext dbContext;
 
         // Thread signal.  
         public static ManualResetEvent allDone = new ManualResetEvent(false);
@@ -177,7 +179,7 @@ namespace Server
                     }
                 }
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 //接收時如果對方斷線則做以下處理
                 Console.WriteLine(e.Message);
@@ -217,11 +219,26 @@ namespace Server
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
             //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
             //而且要驗證這帳號有沒有在裡面 有的話就踢掉另一邊的連線
-            var id = infoData.Id;
-            var userid = infoData.UserId;
+            var userId = infoData.UserId;
             var pw = infoData.UserPwd;
             var ackCode = UserAck.Success;
-            if (infoData.UserId != "999")
+
+            var user = dbContext.Users.Find(userId);
+            //如果用戶不存在則自動幫他創帳號
+            if (user == null)
+            {
+                Console.WriteLine("not found equal userid, created new user.");
+                user = new UserInfoData
+                {
+                    UserId = infoData.UserId,
+                    UserPwd = infoData.UserPwd
+                };
+                dbContext.Users.Add(user);
+                dbContext.SaveChanges();
+            }
+
+            //建立完帳戶、確認用戶帳密是否一致
+            if (infoData.UserPwd != user.UserPwd)
             {
                 ackCode = UserAck.AuthFail;
             }
@@ -377,6 +394,7 @@ namespace Server
         public static void Main(String[] args)
         {
             UsePort = GlobalSetting.PortNum1;
+            dbContext = new PGSql.ApplicationContext();
             Init();
             /*if (PortInUse(GlobalSetting.PortNum1))
             {

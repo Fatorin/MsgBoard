@@ -9,7 +9,7 @@ using Server.PGSql;
 namespace Server.Migrations
 {
     [DbContext(typeof(ApplicationContext))]
-    [Migration("20200530105834_InitialCreate")]
+    [Migration("20200531174517_InitialCreate")]
     partial class InitialCreate
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -22,18 +22,13 @@ namespace Server.Migrations
 
             modelBuilder.Entity("Common.User.UserInfoData", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn);
-
                     b.Property<string>("UserId")
                         .HasColumnType("text");
 
                     b.Property<string>("UserPwd")
                         .HasColumnType("text");
 
-                    b.HasKey("Id");
+                    b.HasKey("UserId");
 
                     b.ToTable("Users");
                 });

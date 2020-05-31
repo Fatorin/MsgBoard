@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text;
 
 namespace Common.User
@@ -7,8 +9,10 @@ namespace Common.User
     [Serializable]
     public class UserInfoData
     {
-        public int Id { get; set; }
+        [Key]
+        [DatabaseGenerated(DatabaseGeneratedOption.None)]
         public string UserId { get; set; }
+
         public string UserPwd { get; set; }
     }
 }
