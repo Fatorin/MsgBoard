@@ -219,11 +219,9 @@ namespace Server
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
             //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
             //而且要驗證這帳號有沒有在裡面 有的話就踢掉另一邊的連線
-            var userId = infoData.UserId;
-            var pw = infoData.UserPwd;
             var ackCode = UserAck.Success;
-
-            var user = dbContext.Users.Find(userId);
+            var user = dbContext.Users.Find(infoData.UserId);
+            //dbContext.Users.Single(u => u.UserId == infoData.UserId);
             //如果用戶不存在則自動幫他創帳號
             if (user == null)
             {
@@ -235,7 +233,7 @@ namespace Server
                 };
                 dbContext.Users.Add(user);
                 dbContext.SaveChanges();
-            }
+            }            
 
             //建立完帳戶、確認用戶帳密是否一致
             if (infoData.UserPwd != user.UserPwd)
