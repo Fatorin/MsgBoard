@@ -9,8 +9,8 @@ namespace Common.Command
     public enum CommandEnum
     {
         LoginAuth,
-        GetMsgAll,
-        GetMsgOnce,
+        MsgAll,
+        MsgOnce,
         LoginKick,
     }
 }

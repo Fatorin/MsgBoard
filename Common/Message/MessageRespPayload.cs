@@ -6,9 +6,9 @@ using System.Text;
 
 namespace Common
 {
-    public static class MessageStreamHelper
+    public static class MessageRespPayload
     {
-        public static byte[] CreateStream(MessageAck ackCode, MessageInfoData[] infoDataArray)
+        public static byte[] CreatePayload(MessageAck ackCode, MessageInfoData[] infoDataArray)
         {
             byte[] byteArray;
 			System.IO.MemoryStream memoryStream = new System.IO.MemoryStream();
@@ -23,7 +23,7 @@ namespace Common
 					if ((infoDataArray[i0] != null))
 					{
 						binaryWriter.Write(true);
-						MessageStreamHelper.BinaryWriter(binaryWriter, infoDataArray[i0]);
+						MessageRespPayload.BinaryWriter(binaryWriter, infoDataArray[i0]);
 					}
 					else
 					{
@@ -41,7 +41,7 @@ namespace Common
 			return byteArray;
 		}
 
-		public static void GetStream(this System.Byte[] payload, out MessageAck ackCode, out MessageInfoData[] infoDataArray)
+		public static void ParsePayload(this System.Byte[] payload, out MessageAck ackCode, out MessageInfoData[] infoDataArray)
 		{
 			System.IO.MemoryStream memoryStream = new System.IO.MemoryStream(payload);
 			System.IO.BinaryReader binaryReader = new System.IO.BinaryReader(memoryStream);
@@ -53,7 +53,7 @@ namespace Common
 				{
 					if ((binaryReader.ReadBoolean() == true))
 					{
-						MessageStreamHelper.BinaryReader(binaryReader, out infoDataArray[i0]);
+						MessageRespPayload.BinaryReader(binaryReader, out infoDataArray[i0]);
 					}
 					else
 					{

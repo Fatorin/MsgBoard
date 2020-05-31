@@ -99,80 +99,90 @@ namespace Server
             // from the asynchronous state object.  
             StateObject state = (StateObject)ar.AsyncState;
             Socket handler = state.workSocket;
-
-            //從socket接收資料
-            int bytesRead = handler.EndReceive(ar);
-            //如果有收到的封包才會做事情
-            if (bytesRead > 0)
+            try
             {
-                //如果收到結束符號才會停止
-                //檢查有沒有CRC 有的話再嘗試接收封包 不然就拒絕
-                //檢查封包長度 傳值給PacketLength
-                //定義PacketLength
-                //如果資料少於PacketLength，會持續接收，並減少前面接收的長度
-                //如果資料都收完了，那麼會結束判斷，並做後續的動作
-                //DO SOMETHING FOR PACK LEN
 
-                if (!state.isCorrectPack)
+                //從socket接收資料
+                int bytesRead = handler.EndReceive(ar);
+                //如果有收到的封包才會做事情
+                if (bytesRead > 0)
                 {
-                    //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
-                    //如果沒有CRC那就直接拒絕接收
-                    Packet.UnPackParam(state.buffer, out var crc, out var dataLen, out var command);
-                    if (crc == Packet.crcCode)
+                    //如果收到結束符號才會停止
+                    //檢查有沒有CRC 有的話再嘗試接收封包 不然就拒絕
+                    //檢查封包長度 傳值給PacketLength
+                    //定義PacketLength
+                    //如果資料少於PacketLength，會持續接收，並減少前面接收的長度
+                    //如果資料都收完了，那麼會結束判斷，並做後續的動作
+                    //DO SOMETHING FOR PACK LEN
+
+                    if (!state.isCorrectPack)
                     {
-                        //設定封包驗證通過(如果有要接收第二段就會繼續接收)
-                        state.isCorrectPack = true;
-                        //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
-                        state.PacketNeedReceiveLen = dataLen;
-                        //設定接收封包大小
-                        state.infoBytes = new byte[dataLen];
-                        //設定封包的指令(第一次的時候)
-                        state.Command = command;
+                        //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
+                        //如果沒有CRC那就直接拒絕接收
+                        Packet.UnPackParam(state.buffer, out var crc, out var dataLen, out var command);
+                        if (crc == Packet.crcCode)
+                        {
+                            //設定封包驗證通過(如果有要接收第二段就會繼續接收)
+                            state.isCorrectPack = true;
+                            //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
+                            state.PacketNeedReceiveLen = dataLen;
+                            //設定接收封包大小
+                            state.infoBytes = new byte[dataLen];
+                            //設定封包的指令(第一次的時候)
+                            state.Command = command;
+                        }
+                        else
+                        {
+                            //如果CRC不對就不動作(先不關閉)
+                            Console.WriteLine("CRC check fail");
+                            return;
+                        }
+                    }
+                    //減去已收到的封包數
+                    //將收到的封包複製到infoBytes，從最後收到的位置
+                    state.PacketNeedReceiveLen -= bytesRead;
+                    Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
+                    //接收完後更新對應的LastReceivedPos
+                    state.LastReceivedPos += bytesRead;
+
+                    //如果封包都收完了 則執行動作
+                    if (state.PacketNeedReceiveLen == 0)
+                    {
+                        // All the data has been read from the
+                        // client. Display it on the console.  
+                        Console.WriteLine($"Read {state.infoBytes.Length} bytes from socket.");
+
+                        //執行對應的FUNC
+                        if (!CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                        {
+                            Console.WriteLine("Not found mapping command function.");
+
+                        };
+                        //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
+                        mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                        //清除封包資訊 重設
+                        state.LastReceivedPos = 0;
+                        state.PacketNeedReceiveLen = 0;
+                        state.isCorrectPack = false;
+                        state.infoBytes = null;
+                        state.Command = 0;
+                        handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        new AsyncCallback(ReadCallback), state);
                     }
                     else
                     {
-                        //如果CRC不對就不動作(先不關閉)
-                        Console.WriteLine("CRC check fail");
-                        return;
+                        // Not all data received. Get more.
+                        handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        new AsyncCallback(ReadCallback), state);
                     }
                 }
-                //減去已收到的封包數
-                //將收到的封包複製到infoBytes，從最後收到的位置
-                state.PacketNeedReceiveLen -= bytesRead;
-                Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
-                //接收完後更新對應的LastReceivedPos
-                state.LastReceivedPos += bytesRead;
-
-                //如果封包都收完了 則執行動作
-                if (state.PacketNeedReceiveLen == 0)
-                {
-                    // All the data has been read from the
-                    // client. Display it on the console.  
-                    Console.WriteLine($"Read {state.infoBytes.Length} bytes from socket.");
-
-                    //執行對應的FUNC
-                    if (!CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
-                    {
-                        Console.WriteLine("Not found mapping command function.");
-
-                    };
-                    //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
-                    mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
-                    //清除封包資訊 重設
-                    state.LastReceivedPos = 0;
-                    state.PacketNeedReceiveLen = 0;
-                    state.isCorrectPack = false;
-                    state.infoBytes = null;
-                    state.Command = 0;
-                    handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
-                    new AsyncCallback(ReadCallback), state);
-                }
-                else
-                {
-                    // Not all data received. Get more.
-                    handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
-                    new AsyncCallback(ReadCallback), state);
-                }
+            }
+            catch(Exception e)
+            {
+                //接收時如果對方斷線則做以下處理
+                Console.WriteLine(e.Message);
+                ClientConnectDict.Remove(handler.RemoteEndPoint.ToString());
+                handler.Close();
             }
         }
 
@@ -220,7 +230,7 @@ namespace Server
             //回傳成功訊息給對應的人
             Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode)));
 
-            if(ackCode == UserAck.AuthFail)
+            if (ackCode == UserAck.AuthFail)
             {
                 ClientConnectDict.Remove(handler.RemoteEndPoint.ToString());
                 Console.WriteLine($"Remove {handler.RemoteEndPoint.ToString()}, AcceptCount:{ClientConnectDict.Count}");
@@ -229,13 +239,13 @@ namespace Server
             //回傳留言版資料
             if (tempMsg.Count != 0 && ackCode != UserAck.AuthFail)
             {
-                Send(handler, Packet.BuildPacket((int)CommandEnum.GetMsgAll, MessageStreamHelper.CreateStream(MessageAck.Success, tempMsg.ToArray())));
+                Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, tempMsg.ToArray())));
             }
         }
 
         private static void ReceviveOneMessage(Socket handler, byte[] byteArray)
         {
-            MessageStreamHelper.GetStream(byteArray, out var ackCode, out var infoDatas);
+            MessageReqPayload.ParsePayload(byteArray, out var infoDatas);
             //理論上只有第一筆訊息 懶得分開寫
             //驗證訊息用而已 連這段轉換都不用寫
             string receviedStr = infoDatas[0].Message;
@@ -247,7 +257,7 @@ namespace Server
                     //不傳送給發話人
                     if (socketTemp.Key == handler.RemoteEndPoint.ToString()) continue;
                     //伺服器接收到的資料
-                    Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.GetMsgOnce, byteArray));
+                    Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, byteArray));
                 }
             }
         }
@@ -333,7 +343,7 @@ namespace Server
             CommandRespDict = new Dictionary<int, Action<Socket, byte[]>>()
                 {
                     { (int)CommandEnum.LoginAuth, ReceviveLoginAuthData},
-                    { (int)CommandEnum.GetMsgOnce, ReceviveOneMessage},
+                    { (int)CommandEnum.MsgOnce, ReceviveOneMessage},
                     { (int)CommandEnum.LoginKick, RecevivecKick},
                 };
         }
@@ -362,28 +372,6 @@ namespace Server
                 GetOneInfoDataFromRedis(entry);
             }
             return false;
-        }
-
-        private void testfun()
-        {
-            byte[] data = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
-            var pack = Packet.BuildPacket(123, data);
-            int len = pack.Length;
-            int crc = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(pack, 0));
-            int dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(pack, 4));
-            int command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(pack, 8));
-            byte[] reciveData = new byte[dataLen];
-            reciveData = pack.Skip(12).ToArray();
-            reciveData.Reverse();
-            Console.WriteLine($"packLen={len}");
-            Console.WriteLine($"crc={crc}");
-            Console.WriteLine($"command={command}");
-            Console.WriteLine($"DataLen={reciveData.Length}");
-
-            for (int i = 0; i < reciveData.Length; i++)
-            {
-                Console.WriteLine($"reciveData{i}={reciveData[i]}");
-            }
         }
 
         public static void Main(String[] args)

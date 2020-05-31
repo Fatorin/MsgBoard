@@ -48,6 +48,33 @@ namespace Client
             bgWorkerGoFunc((int)CommandEnum.LoginAuth);
         }
 
+        private void btnSend_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(tbInput.Text))
+            {
+                ShowLogOnResult($"Enter something, do not enter spaces or blanks.");
+                return;
+            }
+
+            bgWorkerGoFunc((int)CommandEnum.MsgOnce);
+        }
+
+        private void SendMsgOnce()
+        {
+            var msgInfo = new MessageInfoData[]
+            {
+                new MessageInfoData{ Message=tbInput.Text },
+            };
+
+            tbInput.InvokeIfRequired(() =>
+            {
+                tbInput.Text = "";
+            });
+
+            Send(socketClient, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageReqPayload.CreatePayload(msgInfo)));
+            sendDone.WaitOne();
+        }
+
         private void bgWorkerGoFunc(int command)
         {
             if (bgWorkConnect.IsBusy != true)
@@ -74,14 +101,15 @@ namespace Client
         {
             CommandReqDict = new Dictionary<int, Action>()
             {
-                {(int)CommandEnum.LoginAuth, StartClientAndLogin}
+                {(int)CommandEnum.LoginAuth, StartClientAndLogin},
+                {(int)CommandEnum.MsgOnce, SendMsgOnce}
             };
 
             CommandRespDict = new Dictionary<int, Action<byte[]>>()
             {
                 { (int)CommandEnum.LoginAuth, ReceivedLogin},
-                { (int)CommandEnum.GetMsgAll, ReceviveAllMessage},
-                { (int)CommandEnum.GetMsgOnce, ReceviveAllMessage},
+                { (int)CommandEnum.MsgAll, ReceviveAllMessage},
+                { (int)CommandEnum.MsgOnce, ReceviveAllMessage},
             };
         }
 
@@ -100,13 +128,13 @@ namespace Client
                 });
                 return;
             }
-
+            SetLoginAndSendUI(false, true);
             ShowLogOnResult("Please Type Anything 'Press Enter'：");
         }
 
         private void ReceviveAllMessage(byte[] byteArray)
         {
-            MessageStreamHelper.GetStream(byteArray, out var ack, out var infoDatas);
+            MessageRespPayload.ParsePayload(byteArray, out var ack, out var infoDatas);
 
             if (ack != MessageAck.Success)
             {
@@ -117,21 +145,6 @@ namespace Client
             {
                 ShowLogOnResult($"Msg:{infoData.Message}");
             }
-        }
-
-        private void SendMsgOnce(Socket socket, CommandEnum command, string sendMsg)
-        {
-            //轉換成物件再送出
-            var infoDatas = new MessageInfoData[]
-            {
-                new MessageInfoData
-                {
-                    Message = sendMsg,
-                }
-            };
-
-            Send(socketClient, Packet.BuildPacket((int)command, MessageStreamHelper.CreateStream(MessageAck.Success, infoDatas)));
-            sendDone.WaitOne();
         }
 
         private void ShowLogOnResult(string str)
@@ -156,8 +169,15 @@ namespace Client
 
         private void SetLoginAndSendUI(bool showLogin, bool showSend)
         {
-            gbLogin.Visible = showLogin;
-            gbInput.Visible = showSend;
+            gbLogin.InvokeIfRequired(() =>
+            {
+                gbLogin.Visible = showLogin;
+            });
+
+            gbInput.InvokeIfRequired(() =>
+            {
+                gbInput.Visible = showSend;
+            });
         }
 
         #region AsynchronousClient

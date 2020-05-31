@@ -32,5 +32,29 @@ namespace Common.Packet
             dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(dataByte, 4));
             command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(dataByte, 8));
         }
+
+
+        private void testfun()
+        {
+            byte[] data = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+            var pack = Packet.BuildPacket(123, data);
+            int len = pack.Length;
+            int crc = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(pack, 0));
+            int dataLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(pack, 4));
+            int command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(pack, 8));
+            byte[] reciveData = new byte[dataLen];
+            reciveData = pack.Skip(12).ToArray();
+            reciveData.Reverse();
+            Console.WriteLine($"packLen={len}");
+            Console.WriteLine($"crc={crc}");
+            Console.WriteLine($"command={command}");
+            Console.WriteLine($"DataLen={reciveData.Length}");
+
+            for (int i = 0; i < reciveData.Length; i++)
+            {
+                Console.WriteLine($"reciveData{i}={reciveData[i]}");
+            }
+        }
+
     }
 }
