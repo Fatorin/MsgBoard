@@ -65,12 +65,11 @@ namespace Client
             {
                 new MessageInfoData{ Message=tbInput.Text },
             };
-
+            ShowLogOnResult($"{ tbInput.Text }");
             tbInput.InvokeIfRequired(() =>
             {
                 tbInput.Text = "";
             });
-
             Send(socketClient, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageReqPayload.CreatePayload(msgInfo)));
             sendDone.WaitOne();
         }
@@ -139,6 +138,7 @@ namespace Client
             if (ack != MessageAck.Success)
             {
                 ShowLogOnResult($"{nameof(ReceviveAllMessage)} Fail, Ack={ack}");
+                return;
             }
 
             foreach (MessageInfoData infoData in infoDatas)

@@ -263,8 +263,7 @@ namespace Server
             MessageReqPayload.ParsePayload(byteArray, out var infoDatas);
             //理論上只有第一筆訊息 懶得分開寫
             //驗證訊息用而已 連這段轉換都不用寫
-            string receviedStr = infoDatas[0].Message;
-            Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{receviedStr}");
+            Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{infoDatas[0].Message}");
             if (ClientConnectDict.Count > 0)
             {
                 foreach (var socketTemp in ClientConnectDict)
@@ -272,7 +271,7 @@ namespace Server
                     //不傳送給發話人
                     if (socketTemp.Key == handler.RemoteEndPoint.ToString()) continue;
                     //伺服器接收到的資料
-                    Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, byteArray));
+                    Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageRespPayload.CreatePayload(MessageAck.Success, infoDatas.ToArray())));
                 }
             }
         }
