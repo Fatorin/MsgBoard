@@ -264,6 +264,10 @@ namespace Server
             //理論上只有第一筆訊息 懶得分開寫
             //驗證訊息用而已 連這段轉換都不用寫
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{infoDatas[0].Message}");
+            //加入訊息暫存區
+            tempMsg.Add(infoDatas[0]);
+            //存入Redis
+            SaveOneInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), infoDatas[0]);
             if (ClientConnectDict.Count > 0)
             {
                 foreach (var socketTemp in ClientConnectDict)
@@ -369,7 +373,7 @@ namespace Server
             {
                 dataList.Add(new MessageInfoData
                 {
-                    Message = $"testString:{i}"
+                    Message = $"testString{i}"
                 });
             }
             SaveMultiInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), GetRedisDataKey(), dataList);
