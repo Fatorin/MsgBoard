@@ -103,6 +103,7 @@
             this.tbResult.Multiline = true;
             this.tbResult.Name = "tbResult";
             this.tbResult.ReadOnly = true;
+            this.tbResult.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
             this.tbResult.Size = new System.Drawing.Size(301, 304);
             this.tbResult.TabIndex = 9;
             // 
