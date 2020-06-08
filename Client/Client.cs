@@ -65,7 +65,7 @@ namespace Client
             {
                 new MessageInfoData{ Message=tbInput.Text },
             };
-            ShowLogOnResult($"{ tbInput.Text }");
+
             tbInput.InvokeIfRequired(() =>
             {
                 tbInput.Text = "";
@@ -352,6 +352,7 @@ namespace Client
             }
             catch (Exception e)
             {
+                ShowLogOnResult("發送失敗");
                 ShowLogOnResult(e.ToString());
             }
         }

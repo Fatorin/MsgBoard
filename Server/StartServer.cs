@@ -253,8 +253,6 @@ namespace Server
             SaveOneInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), infoDatas[0]);
             foreach (var socketTemp in ClientConnectDict)
             {
-                //不傳送給發話人
-                if (socketTemp.Key == handler.RemoteEndPoint.ToString()) continue;
                 //伺服器接收到的資料
                 Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageRespPayload.CreatePayload(MessageAck.Success, infoDatas.ToArray())));
             }
