@@ -34,6 +34,12 @@ namespace Client
         private void btnLogin_Click(object sender, EventArgs e)
         {
             //懶得寫負載平衡 先這樣
+            if (string.IsNullOrEmpty(tbUID.Text) || string.IsNullOrEmpty(tbPW.Text))
+            {
+                ShowLogOnResult($"Enter something, do not enter spaces or blanks.");
+                return;
+            }
+
             btnLogin.Enabled = false;
             var rand = new Random().Next(1, 3);
             serverPort = GlobalSetting.PortNum1;
