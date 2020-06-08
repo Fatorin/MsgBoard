@@ -101,8 +101,8 @@ namespace Server
         {
             // Retrieve the state object and the handler socket  
             // from the asynchronous state object.  
-            PacketObj state = (PacketObj)ar.AsyncState;
-            Socket handler = state.workSocket;
+            PacketObj packetObj = (PacketObj)ar.AsyncState;
+            Socket handler = packetObj.workSocket;
             try
             {
 
@@ -119,21 +119,14 @@ namespace Server
                     //如果資料都收完了，那麼會結束判斷，並做後續的動作
                     //DO SOMETHING FOR PACK LEN
 
-                    if (!state.isCorrectPack)
+                    if (!packetObj.isCorrectPack)
                     {
                         //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
                         //如果沒有CRC那就直接拒絕接收
-                        Packet.UnPackParam(state.buffer, out var crc, out var dataLen, out var command);
+                        Packet.UnPackParam(packetObj.buffer, out var crc, out var dataLen, out var command);
                         if (crc == Packet.crcCode)
                         {
-                            //設定封包驗證通過(如果有要接收第二段就會繼續接收)
-                            state.isCorrectPack = true;
-                            //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
-                            state.PacketNeedReceiveLen = dataLen;
-                            //設定接收封包大小
-                            state.infoBytes = new byte[dataLen];
-                            //設定封包的指令(第一次的時候)
-                            state.Command = command;
+                            packetObj.SetFirstReceive(dataLen, command);
                         }
                         else
                         {
@@ -142,22 +135,19 @@ namespace Server
                             throw new Exception();
                         }
                     }
-                    //減去已收到的封包數
-                    //將收到的封包複製到infoBytes，從最後收到的位置
-                    state.PacketNeedReceiveLen -= bytesRead;
-                    //如果接收長度異常 需要做特殊處理
-                    Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
-                    //接收完後更新對應的LastReceivedPos
-                    state.LastReceivedPos += bytesRead;
+
+                    //將收到的封包複製到infoBytes，從最後收到的位置     
+                    Array.Copy(packetObj.buffer, 0, packetObj.infoBytes, packetObj.LastReceivedPos, bytesRead);
+                    packetObj.SetContiuneReceive(bytesRead);
 
                     //如果封包都收完了 則執行動作
-                    if (state.PacketNeedReceiveLen == 0)
+                    if (packetObj.PacketNeedReceiveLen == 0)
                     {
                         //執行對應的FUNC
-                        if (CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                        if (CommandRespDict.TryGetValue(packetObj.Command, out var mappingFunc))
                         {
                             //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
-                            mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                            mappingFunc(handler, packetObj.infoBytes.Skip(Packet.VerificationLen).ToArray());
                         }
                         else
                         {
@@ -165,16 +155,16 @@ namespace Server
                             Console.WriteLine("Not mapping function.");
                         }
                         //清除封包資訊 重設
-                        state.ResetPacketObjData();
+                        packetObj.ResetData();
                         //重設後再次接收
-                        handler.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
-                        new AsyncCallback(ReadCallback), state);
+                        handler.BeginReceive(packetObj.buffer, 0, PacketObj.BufferSize, 0,
+                        new AsyncCallback(ReadCallback), packetObj);
                     }
                     else
                     {
                         // Not all data received. Get more.
-                        handler.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
-                        new AsyncCallback(ReadCallback), state);
+                        handler.BeginReceive(packetObj.buffer, 0, PacketObj.BufferSize, 0,
+                        new AsyncCallback(ReadCallback), packetObj);
                     }
                 }
             }

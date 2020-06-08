@@ -33,8 +33,7 @@ namespace Common.Packet
             command = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(dataByte, 8));
         }
 
-
-        private void testfun()
+        private void TestFunc()
         {
             byte[] data = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
             var pack = Packet.BuildPacket(123, data);

@@ -251,12 +251,12 @@ namespace Client
             try
             {
                 // Create the state object.  
-                PacketObj state = new PacketObj();
-                state.workSocket = client;
+                PacketObj packetObj = new PacketObj();
+                packetObj.workSocket = client;
 
                 // Begin receiving the data from the remote device.  
-                client.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
-                    new AsyncCallback(ReceiveCallback), state);
+                client.BeginReceive(packetObj.buffer, 0, PacketObj.BufferSize, 0,
+                    new AsyncCallback(ReceiveCallback), packetObj);
             }
             catch (Exception e)
             {
@@ -270,50 +270,42 @@ namespace Client
             {
                 // Retrieve the state object and the client socket
                 // from the asynchronous state object.  
-                PacketObj state = (PacketObj)ar.AsyncState;
-                Socket client = state.workSocket;
+                PacketObj packetObj = (PacketObj)ar.AsyncState;
+                Socket client = packetObj.workSocket;
 
                 // Read data from the remote device.  
                 int bytesRead = client.EndReceive(ar);
 
                 if (bytesRead > 0)
                 {
-                    if (!state.isCorrectPack)
+                    if (!packetObj.isCorrectPack)
                     {
                         //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
                         //如果沒有CRC那就直接拒絕接收
-                        Packet.UnPackParam(state.buffer, out var crc, out var dataLen, out var command);
+                        Packet.UnPackParam(packetObj.buffer, out var crc, out var dataLen, out var command);
                         if (crc == Packet.crcCode)
                         {
-                            //設定封包驗證通過(如果有要接收第二段就會繼續接收)
-                            state.isCorrectPack = true;
-                            //設定封包的長度(第一次的時候)，要減少前面的crc dataLen command
-                            state.PacketNeedReceiveLen = dataLen;
-                            //設定接收封包大小
-                            state.infoBytes = new byte[dataLen];
-                            //設定封包的指令(第一次的時候)
-                            state.Command = command;
+                            packetObj.SetFirstReceive(dataLen, command);
                         }
                         else
                         {
                             //如果CRC不對就不動作(先不關閉)
                             ShowLogOnResult("CRC check fail");
-                            return;
+                            throw new Exception();
                         }
                     }
-                    //減去已收到的封包數
                     //將收到的封包複製到infoBytes，從最後收到的位置
-                    state.PacketNeedReceiveLen -= bytesRead;
-                    Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
+                    Array.Copy(packetObj.buffer, 0, packetObj.infoBytes, packetObj.LastReceivedPos, bytesRead);
+                    //減去已收到的封包數
                     //接收完後更新對應的LastReceivedPos
-                    state.LastReceivedPos += bytesRead;
+                    packetObj.SetContiuneReceive(bytesRead);
 
-                    if (state.PacketNeedReceiveLen == 0)
+                    if (packetObj.PacketNeedReceiveLen == 0)
                     {
                         //執行對應的FUNC
-                        if (CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                        if (CommandRespDict.TryGetValue(packetObj.Command, out var mappingFunc))
                         {
-                            mappingFunc(state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                            mappingFunc(packetObj.infoBytes.Skip(Packet.VerificationLen).ToArray());
                         }
                         else
                         {
@@ -327,8 +319,8 @@ namespace Client
                     }
                     else
                     {
-                        client.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
-                        new AsyncCallback(ReceiveCallback), state);
+                        client.BeginReceive(packetObj.buffer, 0, PacketObj.BufferSize, 0,
+                        new AsyncCallback(ReceiveCallback), packetObj);
                     }
                 }
             }
