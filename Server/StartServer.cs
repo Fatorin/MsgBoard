@@ -23,7 +23,6 @@ namespace Server
     {
         private static ConcurrentDictionary<string, Socket> ClientConnectDict;
         private static Dictionary<int, Action<Socket, byte[]>> CommandRespDict;
-        private static List<MessageInfoData> AllMsg = new List<MessageInfoData>();
         private static int UsePort;
         private static PGSql.ApplicationContext dbContext;
 
@@ -235,9 +234,15 @@ namespace Server
             Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode)));
 
             //回傳留言版資料
-            if (AllMsg.Count != 0 && ackCode != UserAck.AuthFail)
+            var values = GetRedisDb(RedisHelper.RedisLinkNumber.MsgData).ListRange(GetRedisDataKey(), -100, -1);
+            if (ackCode != UserAck.AuthFail && values.Length > 0)
             {
-                Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, AllMsg.ToArray())));
+                var MsgInfoList = new List<MessageInfoData>();
+                foreach (string value in values)
+                {
+                    MsgInfoList.Add(new MessageInfoData { Message = value });
+                }
+                Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, MsgInfoList.ToArray())));
             }
         }
 
@@ -247,8 +252,6 @@ namespace Server
             //理論上只有第一筆訊息 懶得分開寫
             //驗證訊息用而已 連這段轉換都不用寫
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{infoDatas[0].Message}");
-            //加入訊息暫存區
-            AllMsg.Add(infoDatas[0]);
             //存入Redis
             SaveOneInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), infoDatas[0]);
             foreach (var socketTemp in ClientConnectDict)
@@ -281,10 +284,6 @@ namespace Server
         private static string GetRedisDataKey()
         {
             return "MessageList";
-        }
-        private static void GetOneInfoDataFromRedis(RedisValue value)
-        {
-            AllMsg.Add(new MessageInfoData { Message = value });
         }
 
         private static void SaveOneInfoDataToRedis(IDatabase redisDb, MessageInfoData infoData)
@@ -324,7 +323,6 @@ namespace Server
         {
             InitMapping();
             InitFakeData();
-            GetTempData();
         }
 
         private static void InitMapping()
@@ -351,16 +349,6 @@ namespace Server
             SaveMultiInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), GetRedisDataKey(), dataList);
         }
 
-        private static void GetTempData()
-        {
-            //0表示連線  1表示資料存放處
-            //從Redis撈最後100筆
-            var values = GetRedisDb(RedisHelper.RedisLinkNumber.MsgData).ListRange(GetRedisDataKey(), -100, -1);
-            foreach (var value in values)
-            {
-                GetOneInfoDataFromRedis(value);
-            }
-        }
 
         public static void Main(String[] args)
         {
