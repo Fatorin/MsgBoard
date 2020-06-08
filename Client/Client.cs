@@ -251,11 +251,11 @@ namespace Client
             try
             {
                 // Create the state object.  
-                StateObject state = new StateObject();
+                PacketObj state = new PacketObj();
                 state.workSocket = client;
 
                 // Begin receiving the data from the remote device.  
-                client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                client.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
                     new AsyncCallback(ReceiveCallback), state);
             }
             catch (Exception e)
@@ -270,7 +270,7 @@ namespace Client
             {
                 // Retrieve the state object and the client socket
                 // from the asynchronous state object.  
-                StateObject state = (StateObject)ar.AsyncState;
+                PacketObj state = (PacketObj)ar.AsyncState;
                 Socket client = state.workSocket;
 
                 // Read data from the remote device.  
@@ -278,9 +278,6 @@ namespace Client
 
                 if (bytesRead > 0)
                 {
-                    //持續收到封包直到結束
-                    ShowLogOnResult($"Get {bytesRead} bytes from socket.");
-
                     if (!state.isCorrectPack)
                     {
                         //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
@@ -314,29 +311,23 @@ namespace Client
                     if (state.PacketNeedReceiveLen == 0)
                     {
                         //執行對應的FUNC
-                        if (!CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                        if (CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
                         {
-                            ShowLogOnResult("Not found mapping command function.");
-                        };
-                        ShowLogOnResult($"Get all bytes {state.infoBytes.Length} from socket.");
+                            mappingFunc(state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                        }
+                        else
+                        {
+                            ShowLogOnResult("Not mapping function.");
+                        }
                         //接收完成
-                        receiveDone.Set();
-                        //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
-                        mappingFunc(state.infoBytes.Skip(Packet.VerificationLen).ToArray());
-                        //清除封包資訊 重設
-                        /*state.LastReceivedPos = 0;
-                        state.PacketNeedReceiveLen = 0;
-                        state.isCorrectPack = false;
-                        state.infoBytes = null;
-                        state.Command = 0;
-                        client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
-                        new AsyncCallback(ReceiveCallback), state);*/
+                        receiveDone.Set();                        
+                        //開始接收新的封包
                         Receive(socketClient);
                         receiveDone.WaitOne();
                     }
                     else
                     {
-                        client.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        client.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
                         new AsyncCallback(ReceiveCallback), state);
                     }
                 }
@@ -363,7 +354,6 @@ namespace Client
 
                 // Complete sending the data to the remote device.  
                 int bytesSent = client.EndSend(ar);
-                ShowLogOnResult($"Sent {bytesSent} bytes to server.");
 
                 // Signal that all bytes have been sent.  
                 sendDone.Set();

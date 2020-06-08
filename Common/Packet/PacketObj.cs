@@ -5,7 +5,7 @@ using System.Text;
 
 namespace Common.Packet
 {
-    public class StateObject
+    public class PacketObj
     {
         // Client  socket.  
         public Socket workSocket = null;
@@ -19,5 +19,15 @@ namespace Common.Packet
         public bool isCorrectPack = false;
         public int LastReceivedPos;
         public int Command;
+
+        public void ResetPacketObjData()
+        {
+            PacketNeedReceiveLen = 0;
+            infoBytes = null;
+            isCorrectPack = false;
+            LastReceivedPos = 0;
+            Command = 0;
+        }
+
     }
 }

@@ -7,6 +7,7 @@ using Newtonsoft.Json;
 using Server.Redis;
 using StackExchange.Redis;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -20,9 +21,9 @@ namespace Server
 {
     class StartServer
     {
-        private static Dictionary<string, Socket> ClientConnectDict;
+        private static ConcurrentDictionary<string, Socket> ClientConnectDict;
         private static Dictionary<int, Action<Socket, byte[]>> CommandRespDict;
-        private static List<MessageInfoData> tempMsg = new List<MessageInfoData>();
+        private static List<MessageInfoData> AllMsg = new List<MessageInfoData>();
         private static int UsePort;
         private static PGSql.ApplicationContext dbContext;
 
@@ -78,8 +79,6 @@ namespace Server
 
         public static void AcceptCallback(IAsyncResult ar)
         {
-            // Signal the main thread to continue.  
-            allDone.Set();
 
             // Get the socket that handles the client request.  
             Socket listener = (Socket)ar.AsyncState;
@@ -87,19 +86,22 @@ namespace Server
 
             // Create the state object.  
             Console.WriteLine("Accept one connect.");
-            StateObject state = new StateObject();
-            ClientConnectDict.Add(handler.RemoteEndPoint.ToString(), handler);
+            PacketObj state = new PacketObj();
+            ClientConnectDict.TryAdd(handler.RemoteEndPoint.ToString(), handler);
             Console.WriteLine($"Client:{handler.RemoteEndPoint.ToString()} success. AcceptCount:{ClientConnectDict.Count}");
             state.workSocket = handler;
-            handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+            handler.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
                 new AsyncCallback(ReadCallback), state);
+            // Signal the main thread to continue.  
+            allDone.Set();
+            //避免DICT鎖死 但是效能會變差 可以改用ConcurrecntDict
         }
 
         public static void ReadCallback(IAsyncResult ar)
         {
             // Retrieve the state object and the handler socket  
             // from the asynchronous state object.  
-            StateObject state = (StateObject)ar.AsyncState;
+            PacketObj state = (PacketObj)ar.AsyncState;
             Socket handler = state.workSocket;
             try
             {
@@ -135,14 +137,15 @@ namespace Server
                         }
                         else
                         {
-                            //如果CRC不對就不動作(先不關閉)
-                            Console.WriteLine("CRC check fail");
-                            return;
+                            //如果CRC不對就不動作 應該要踢掉 代表這個使用者有問題
+                            Console.WriteLine("CRC check fail, make new exception.");
+                            throw new Exception();
                         }
                     }
                     //減去已收到的封包數
                     //將收到的封包複製到infoBytes，從最後收到的位置
                     state.PacketNeedReceiveLen -= bytesRead;
+                    //如果接收長度異常 需要做特殊處理
                     Array.Copy(state.buffer, 0, state.infoBytes, state.LastReceivedPos, bytesRead);
                     //接收完後更新對應的LastReceivedPos
                     state.LastReceivedPos += bytesRead;
@@ -150,40 +153,36 @@ namespace Server
                     //如果封包都收完了 則執行動作
                     if (state.PacketNeedReceiveLen == 0)
                     {
-                        // All the data has been read from the
-                        // client. Display it on the console.  
-                        Console.WriteLine($"Read {state.infoBytes.Length} bytes from socket.");
-
                         //執行對應的FUNC
-                        if (!CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
+                        if (CommandRespDict.TryGetValue(state.Command, out var mappingFunc))
                         {
-                            Console.WriteLine("Not found mapping command function.");
-
-                        };
-                        //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
-                        mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                            //傳送資料給對應的Command，扣掉前面的CRC,DataLen,Command
+                            mappingFunc(handler, state.infoBytes.Skip(Packet.VerificationLen).ToArray());
+                        }
+                        else
+                        {
+                            //有對應的Function就執行，沒對應的Func就報錯但會繼續執行
+                            Console.WriteLine("Not mapping function.");
+                        }
                         //清除封包資訊 重設
-                        state.LastReceivedPos = 0;
-                        state.PacketNeedReceiveLen = 0;
-                        state.isCorrectPack = false;
-                        state.infoBytes = null;
-                        state.Command = 0;
-                        handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        state.ResetPacketObjData();
+                        //重設後再次接收
+                        handler.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
                         new AsyncCallback(ReadCallback), state);
                     }
                     else
                     {
                         // Not all data received. Get more.
-                        handler.BeginReceive(state.buffer, 0, StateObject.BufferSize, 0,
+                        handler.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
                         new AsyncCallback(ReadCallback), state);
                     }
                 }
             }
             catch (Exception e)
             {
-                //接收時如果對方斷線則做以下處理
+                //接收時如果發生錯誤則做以下處理
                 Console.WriteLine(e.Message);
-                ClientConnectDict.Remove(handler.RemoteEndPoint.ToString());
+                ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
                 handler.Close();
             }
         }
@@ -204,7 +203,6 @@ namespace Server
 
                 // Complete sending the data to the remote device.  
                 int bytesSent = handler.EndSend(ar);
-                Console.WriteLine("Sent {0} bytes to client.", bytesSent);
             }
             catch (Exception e)
             {
@@ -233,28 +231,24 @@ namespace Server
                 };
                 dbContext.Users.Add(user);
                 dbContext.SaveChanges();
-            }            
+            }
 
             //建立完帳戶、確認用戶帳密是否一致
             if (infoData.UserPwd != user.UserPwd)
             {
                 ackCode = UserAck.AuthFail;
+                ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
+                Console.WriteLine($"Remove {handler.RemoteEndPoint}, AcceptCount:{ClientConnectDict.Count}");
             }
-            //驗證成功就通知另一個伺服器把人踢了
+            //驗證成功就通知另一個伺服器把人踢了(這邊要用Redis做)
             //要重寫與另一個SERVER溝通的方法
             //回傳成功訊息給對應的人
             Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode)));
 
-            if (ackCode == UserAck.AuthFail)
-            {
-                ClientConnectDict.Remove(handler.RemoteEndPoint.ToString());
-                Console.WriteLine($"Remove {handler.RemoteEndPoint.ToString()}, AcceptCount:{ClientConnectDict.Count}");
-                return;
-            }
             //回傳留言版資料
-            if (tempMsg.Count != 0 && ackCode != UserAck.AuthFail)
+            if (AllMsg.Count != 0 && ackCode != UserAck.AuthFail)
             {
-                Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, tempMsg.ToArray())));
+                Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, AllMsg.ToArray())));
             }
         }
 
@@ -265,27 +259,24 @@ namespace Server
             //驗證訊息用而已 連這段轉換都不用寫
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{infoDatas[0].Message}");
             //加入訊息暫存區
-            tempMsg.Add(infoDatas[0]);
+            AllMsg.Add(infoDatas[0]);
             //存入Redis
             SaveOneInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), infoDatas[0]);
-            if (ClientConnectDict.Count > 0)
+            foreach (var socketTemp in ClientConnectDict)
             {
-                foreach (var socketTemp in ClientConnectDict)
-                {
-                    //不傳送給發話人
-                    if (socketTemp.Key == handler.RemoteEndPoint.ToString()) continue;
-                    //伺服器接收到的資料
-                    Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageRespPayload.CreatePayload(MessageAck.Success, infoDatas.ToArray())));
-                }
+                //不傳送給發話人
+                if (socketTemp.Key == handler.RemoteEndPoint.ToString()) continue;
+                //伺服器接收到的資料
+                Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageRespPayload.CreatePayload(MessageAck.Success, infoDatas.ToArray())));
             }
         }
 
         private static void RecevivecKick(Socket handler, byte[] byteArray)
         {
             ClientConnectDict.TryGetValue(Encoding.UTF8.GetString(byteArray), out var socketTemp);
-            ClientConnectDict.Remove(socketTemp.RemoteEndPoint.ToString());
+            ClientConnectDict.TryRemove(socketTemp.RemoteEndPoint.ToString(), out var _);
             Console.WriteLine($"Client:{socketTemp.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-            socketTemp.Close();
+            Disconnect(socketTemp);
         }
 
         private static void Disconnect(Socket handler)
@@ -304,30 +295,24 @@ namespace Server
         {
             return "MessageList";
         }
-        private static void GetOneInfoDataFromRedis(HashEntry entry)
+        private static void GetOneInfoDataFromRedis(RedisValue value)
         {
-            var infoData = JsonConvert.DeserializeObject<MessageInfoData>(entry.Value);
-
-            tempMsg.Add(infoData);
+            AllMsg.Add(new MessageInfoData { Message = value });
         }
 
         private static void SaveOneInfoDataToRedis(IDatabase redisDb, MessageInfoData infoData)
         {
-            //找到當前行數 並新增字串
-            redisDb.HashSet(GetRedisDataKey(), tempMsg.Count - 1, JsonConvert.SerializeObject(infoData));
+            //直接新增到最末端
+            redisDb.ListRightPush(GetRedisDataKey(), JsonConvert.SerializeObject(infoData.Message));
         }
 
         private static void SaveMultiInfoDataToRedis(IDatabase redisDb, string key, List<MessageInfoData> infoDatas)
         {
             //儲存所有的資訊到Redis
-            var hashes = new List<HashEntry>();
-
             for (int i = 0; i < infoDatas.Count; i++)
             {
-                hashes.Add(new HashEntry(i, JsonConvert.SerializeObject(infoDatas[i])));
+                redisDb.ListRightPush(key, infoDatas[i].Message);
             }
-
-            redisDb.HashSet(key, hashes.ToArray());
         }
         #endregion
 
@@ -357,7 +342,7 @@ namespace Server
 
         private static void InitMapping()
         {
-            ClientConnectDict = new Dictionary<string, Socket>();
+            ClientConnectDict = new ConcurrentDictionary<string, Socket>();
             CommandRespDict = new Dictionary<int, Action<Socket, byte[]>>()
                 {
                     { (int)CommandEnum.LoginAuth, ReceviveLoginAuthData},
@@ -379,17 +364,15 @@ namespace Server
             SaveMultiInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), GetRedisDataKey(), dataList);
         }
 
-        private static bool GetTempData()
+        private static void GetTempData()
         {
-            //從DB或REDIS撈資料
-            //先從Redis Api 尋找資料 有的話就回傳整串 沒有就從DB撈
             //0表示連線  1表示資料存放處
-            var entries = GetRedisDb(RedisHelper.RedisLinkNumber.MsgData).HashGetAll(GetRedisDataKey());
-            foreach (HashEntry entry in entries)
+            //從Redis撈最後100筆
+            var values = GetRedisDb(RedisHelper.RedisLinkNumber.MsgData).ListRange(GetRedisDataKey(), -100, -1);
+            foreach (var value in values)
             {
-                GetOneInfoDataFromRedis(entry);
+                GetOneInfoDataFromRedis(value);
             }
-            return false;
         }
 
         public static void Main(String[] args)
