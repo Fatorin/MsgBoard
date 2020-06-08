@@ -72,7 +72,7 @@ namespace Server
                 Console.WriteLine(e.ToString());
             }
 
-            Console.WriteLine("\nPress ENTER to continue...");
+            Console.WriteLine("\nPress ENTER to exit...");
             Console.ReadKey();
 
         }
@@ -94,7 +94,6 @@ namespace Server
                 new AsyncCallback(ReadCallback), state);
             // Signal the main thread to continue.  
             allDone.Set();
-            //避免DICT鎖死 但是效能會變差 可以改用ConcurrecntDict
         }
 
         public static void ReadCallback(IAsyncResult ar)
@@ -171,7 +170,7 @@ namespace Server
             catch (Exception e)
             {
                 //接收時如果發生錯誤則做以下處理
-                Console.WriteLine(e.Message);
+                Console.WriteLine($"Remove {handler.RemoteEndPoint}, AcceptCount:{ClientConnectDict.Count}");
                 ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
                 handler.Close();
             }
