@@ -169,9 +169,7 @@ namespace Server
             catch (Exception e)
             {
                 //接收時如果發生錯誤則做以下處理
-                Console.WriteLine($"Remove {handler.RemoteEndPoint}, AcceptCount:{ClientConnectDict.Count}");
-                ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
-                handler.Close();
+                ExceptionDisconnect(handler);
             }
         }
 
@@ -195,6 +193,7 @@ namespace Server
             catch (Exception e)
             {
                 Console.WriteLine(e.ToString());
+                ExceptionDisconnect((Socket)ar.AsyncState);
             }
         }
         #endregion
@@ -266,11 +265,18 @@ namespace Server
             ClientConnectDict.TryGetValue(Encoding.UTF8.GetString(byteArray), out var socketTemp);
             ClientConnectDict.TryRemove(socketTemp.RemoteEndPoint.ToString(), out var _);
             Console.WriteLine($"Client:{socketTemp.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-            Disconnect(socketTemp);
+            ManualDisconnect(socketTemp);
         }
 
-        private static void Disconnect(Socket handler)
+        private static void ManualDisconnect(Socket handler)
         {
+            handler.Shutdown(SocketShutdown.Both);
+            handler.Close();
+        }
+        private static void ExceptionDisconnect(Socket handler)
+        {
+            Console.WriteLine($"Remove {handler.RemoteEndPoint}, AcceptCount:{ClientConnectDict.Count}");
+            ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
             handler.Shutdown(SocketShutdown.Both);
             handler.Close();
         }
