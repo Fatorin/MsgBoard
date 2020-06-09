@@ -43,14 +43,14 @@ namespace Client
             btnLogin.Enabled = false;
             var rand = new Random().Next(1, 3);
             serverPort = GlobalSetting.PortNum1;
-            /*if (rand == 1)
+            if (rand == 1)
             {
                 serverPort = GlobalSetting.PortNum1;
             }
             else
             {
                 serverPort = GlobalSetting.PortNum2;
-            }*/
+            }
             bgWorkerGoFunc((int)CommandEnum.LoginAuth);
         }
 
@@ -286,8 +286,6 @@ namespace Client
                 {
                     if (!packetObj.isCorrectPack)
                     {
-                        //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
-                        //如果沒有CRC那就直接拒絕接收
                         Packet.UnPackParam(packetObj.buffer, out var crc, out var dataLen, out var command);
                         if (crc == Packet.crcCode)
                         {

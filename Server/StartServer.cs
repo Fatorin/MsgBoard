@@ -15,6 +15,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 namespace Server
@@ -43,7 +44,6 @@ namespace Server
             // Create a TCP/IP socket.  
             Socket listener = new Socket(ipAddress.AddressFamily,
                 SocketType.Stream, ProtocolType.Tcp);
-
             // Bind the socket to the local endpoint and listen for incoming connections.  
             try
             {
@@ -86,8 +86,6 @@ namespace Server
             // Create the state object.  
             Console.WriteLine("Accept one connect.");
             PacketObj state = new PacketObj();
-            ClientConnectDict.TryAdd(handler.RemoteEndPoint.ToString(), handler);
-            Console.WriteLine($"Client:{handler.RemoteEndPoint.ToString()} success. AcceptCount:{ClientConnectDict.Count}");
             state.workSocket = handler;
             handler.BeginReceive(state.buffer, 0, PacketObj.BufferSize, 0,
                 new AsyncCallback(ReadCallback), state);
@@ -109,14 +107,6 @@ namespace Server
                 //如果有收到的封包才會做事情
                 if (bytesRead > 0)
                 {
-                    //如果收到結束符號才會停止
-                    //檢查有沒有CRC 有的話再嘗試接收封包 不然就拒絕
-                    //檢查封包長度 傳值給PacketLength
-                    //定義PacketLength
-                    //如果資料少於PacketLength，會持續接收，並減少前面接收的長度
-                    //如果資料都收完了，那麼會結束判斷，並做後續的動作
-                    //DO SOMETHING FOR PACK LEN
-
                     if (!packetObj.isCorrectPack)
                     {
                         //檢查是不是正常封包 第一會檢查CRC 有的話就改成TRUE
@@ -124,6 +114,7 @@ namespace Server
                         Packet.UnPackParam(packetObj.buffer, out var crc, out var dataLen, out var command);
                         if (crc == Packet.crcCode)
                         {
+                            //依照第一筆封包做初始化的行為
                             packetObj.SetFirstReceive(dataLen, command);
                         }
                         else
@@ -169,7 +160,11 @@ namespace Server
             catch (Exception e)
             {
                 //接收時如果發生錯誤則做以下處理
-                ExceptionDisconnect(handler);
+                Console.WriteLine(e.ToString());
+                if (handler.Connected)
+                {
+                    ExceptionDisconnect(handler);
+                }
             }
         }
 
@@ -202,11 +197,7 @@ namespace Server
         {
             UserReqLoginPayload.ParsePayload(byteArray, out var infoData);
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, UserId:{infoData.UserId}");
-            //這邊是帳密驗證的部分 邏輯還沒寫//db還沒撈
-            //而且要驗證這帳號有沒有在裡面 有的話就踢掉另一邊的連線
-            var ackCode = UserAck.Success;
             var user = dbContext.Users.Find(infoData.UserId);
-            //dbContext.Users.Single(u => u.UserId == infoData.UserId);
             //如果用戶不存在則自動幫他創帳號
             if (user == null)
             {
@@ -221,28 +212,27 @@ namespace Server
             }
 
             //建立完帳戶、確認用戶帳密是否一致
+            //不一致就傳送失敗訊號，並且剔除使用者
             if (infoData.UserPwd != user.UserPwd)
             {
-                ackCode = UserAck.AuthFail;
-                ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
-                Console.WriteLine($"Remove {handler.RemoteEndPoint}, AcceptCount:{ClientConnectDict.Count}");
+                Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(UserAck.AuthFail)));
+                return;
             }
             //驗證成功就通知另一個伺服器把人踢了(這邊要用Redis做)
+            PublishLoginToRedis(infoData.UserId);
             //要重寫與另一個SERVER溝通的方法
             //回傳成功訊息給對應的人
-            Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(ackCode)));
+            Send(handler, Packet.BuildPacket((int)CommandEnum.LoginAuth, UserRespLoginPayload.CreatePayload(UserAck.Success)));
 
-            //回傳留言版資料
+            //回傳留言版最後一百筆資料
             var values = GetRedisDb(RedisHelper.RedisLinkNumber.MsgData).ListRange(GetRedisDataKey(), -100, -1);
-            if (ackCode != UserAck.AuthFail && values.Length > 0)
+            var MsgInfoList = new List<MessageInfoData>();
+            foreach (string value in values)
             {
-                var MsgInfoList = new List<MessageInfoData>();
-                foreach (string value in values)
-                {
-                    MsgInfoList.Add(new MessageInfoData { Message = value });
-                }
-                Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, MsgInfoList.ToArray())));
+                MsgInfoList.Add(new MessageInfoData { Message = value });
             }
+            Send(handler, Packet.BuildPacket((int)CommandEnum.MsgAll, MessageRespPayload.CreatePayload(MessageAck.Success, MsgInfoList.ToArray())));
+            ClientConnectDict.TryAdd(infoData.UserId, handler);
         }
 
         private static void ReceviveOneMessage(Socket handler, byte[] byteArray)
@@ -252,33 +242,44 @@ namespace Server
             //驗證訊息用而已 連這段轉換都不用寫
             Console.WriteLine($"Clinet:{handler.RemoteEndPoint} Time：{DateTime.Now:yyyy-MM-dd HH:mm:ss:fff}, Msg:{infoDatas[0].Message}");
             //存入Redis
-            SaveOneInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), infoDatas[0]);
+            SaveOneMessageInfoDataToRedis(GetRedisDb(RedisHelper.RedisLinkNumber.MsgData), infoDatas[0]);
+            //丟到Redis發布訊息(因為兩台同時註冊了，避免重送)
+            PublishMessageToRedis(infoDatas[0].Message);
+        }
+
+        private static void SendMsgToAll(MessageInfoData[] infoDatas)
+        {
             foreach (var socketTemp in ClientConnectDict)
             {
-                //伺服器接收到的資料
+                //將收到的訊息傳送給所有當前用戶
                 Send(socketTemp.Value, Packet.BuildPacket((int)CommandEnum.MsgOnce, MessageRespPayload.CreatePayload(MessageAck.Success, infoDatas.ToArray())));
             }
         }
 
-        private static void RecevivecKick(Socket handler, byte[] byteArray)
-        {
-            ClientConnectDict.TryGetValue(Encoding.UTF8.GetString(byteArray), out var socketTemp);
-            ClientConnectDict.TryRemove(socketTemp.RemoteEndPoint.ToString(), out var _);
-            Console.WriteLine($"Client:{socketTemp.RemoteEndPoint} disconnect. Client online count:{ClientConnectDict.Count}");
-            ManualDisconnect(socketTemp);
-        }
-
-        private static void ManualDisconnect(Socket handler)
-        {
-            handler.Shutdown(SocketShutdown.Both);
-            handler.Close();
-        }
         private static void ExceptionDisconnect(Socket handler)
         {
             Console.WriteLine($"Remove {handler.RemoteEndPoint}, AcceptCount:{ClientConnectDict.Count}");
-            ClientConnectDict.TryRemove(handler.RemoteEndPoint.ToString(), out var _);
             handler.Shutdown(SocketShutdown.Both);
             handler.Close();
+        }
+
+        private static void ManualDisconnect(String username)
+        {
+            try
+            {
+                if (!ClientConnectDict.TryRemove(username, out var handler))
+                {
+                    Console.WriteLine($"[{username}] not find.");
+                    return;
+                }
+                Console.WriteLine($"[{username}] repeat login , remove connect.");
+                ExceptionDisconnect(handler);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.ToString());
+            }
+
         }
 
         #region Redis//DB
@@ -292,7 +293,7 @@ namespace Server
             return "MessageList";
         }
 
-        private static void SaveOneInfoDataToRedis(IDatabase redisDb, MessageInfoData infoData)
+        private static void SaveOneMessageInfoDataToRedis(IDatabase redisDb, MessageInfoData infoData)
         {
             //直接新增到最末端
             redisDb.ListRightPush(GetRedisDataKey(), JsonConvert.SerializeObject(infoData.Message));
@@ -305,6 +306,42 @@ namespace Server
             {
                 redisDb.ListRightPush(key, infoDatas[i].Message);
             }
+        }
+
+        private static void SubscribeToRedis()
+        {
+            //註冊Redis的事件
+            var sub = RedisHelper.Connection.GetSubscriber();
+            sub.Subscribe("messages", (channel, message) =>
+            {
+                //當收到Message的時候，會使用Send傳送給所有用戶
+                var MsgInfos = new MessageInfoData[]
+                {
+                    new MessageInfoData{ Message = message }
+                };
+                SendMsgToAll(MsgInfos);
+            });
+
+            sub.Subscribe("login", (channel, loginUsername) =>
+            {
+                //當收到登入訊息後，會先通知踢掉，再進行後續登入吧(?
+                //先不要弄
+                ManualDisconnect(loginUsername);
+            });
+        }
+
+        private static void PublishMessageToRedis(String message)
+        {
+            //註冊Redis的事件
+            var sub = RedisHelper.Connection.GetSubscriber();
+            sub.Publish("messages", message);
+        }
+
+        private static void PublishLoginToRedis(String loginUsername)
+        {
+            //註冊Redis的事件
+            var sub = RedisHelper.Connection.GetSubscriber();
+            sub.Publish("login", loginUsername);
         }
         #endregion
 
@@ -325,11 +362,6 @@ namespace Server
             }
             return inUse;
         }
-        private static void Init()
-        {
-            InitMapping();
-            InitFakeData();
-        }
 
         private static void InitMapping()
         {
@@ -338,7 +370,6 @@ namespace Server
                 {
                     { (int)CommandEnum.LoginAuth, ReceviveLoginAuthData},
                     { (int)CommandEnum.MsgOnce, ReceviveOneMessage},
-                    { (int)CommandEnum.LoginKick, RecevivecKick},
                 };
         }
 
@@ -360,8 +391,10 @@ namespace Server
         {
             UsePort = GlobalSetting.PortNum1;
             dbContext = new PGSql.ApplicationContext();
-            Init();
-            /*if (PortInUse(GlobalSetting.PortNum1))
+            InitMapping();
+            InitFakeData();
+            SubscribeToRedis();
+            if (PortInUse(GlobalSetting.PortNum1))
             {
                 UsePort = GlobalSetting.PortNum2;
             }
@@ -371,7 +404,7 @@ namespace Server
                 Console.WriteLine("Port are used.");
                 Console.ReadKey();
                 return;
-            }*/
+            }
 
             Console.WriteLine($"Port use {UsePort}");
 
